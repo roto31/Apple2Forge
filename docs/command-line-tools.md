@@ -88,10 +88,11 @@ The original program runs unchanged in an emulator built into the app.
 
 ```bash
 tools/10_analyze.sh "My Disk.dsk"                    # read-only analysis → work/<disk>/analysis.json + analysis.md
-tools/20_wrap_t1.sh "My Disk.dsk" --name "My Game"   # → work/<disk>/t1/My Game.app
+tools/20_wrap_t1.sh "My Game side A.dsk" "My Game side B.dsk" --name "My Game"   # → work/<disk>/t1/My Game.app
+tools/20_wrap_t1.sh "My Disk.dsk" --model auto --rom-dir "$HOME/Library/Application Support/Apple2Forge/roms"
 ```
 
-The app loads `apple2plus.rom` from `~/Library/Application Support/Apple2Forge/roms/` each time it starts, and shows an alert if the file is missing. An existing app with the same name is first moved to `<name>.app.backup-<time>`.
+Pass every side of the title; the helper `tools/lib/t1_disk_set.py` orders them and writes `disks.tsv` into the app. `--model=auto` (default) picks Apple ][+ vs enhanced //e; `--rom-dir` is where those boot tests read ROMs from (the same folder the app uses at launch). An existing app with the same name is first moved to `<name>.app.backup-<time>`.
 
 ```bash
 tools/25_check_t1.sh "work/<disk>/t1/My Game.app"  # headless boot check on the Apple ][+; exit 0 boots, 1 not, 2 can't check

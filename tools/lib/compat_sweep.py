@@ -169,12 +169,9 @@ def run_boot_for(args: argparse.Namespace, model: str, drive1: str, drive2: str 
                      graphics_blank=graphics_page_blank(regs, main, aux))
 
 
-def classify(args: argparse.Namespace, title: dict) -> dict:
-    disks = os.path.join(args.library, "disks")
-    drive1 = os.path.join(disks, title["boot"]["drive1"])
-    drive2 = os.path.join(disks, title["boot"]["drive2"]) if title["boot"]["drive2"] else None
-    names_iie = bool(IIE_HINT.search(" ".join([title["title"]] + title["notes"]
-                                              + [s["file"] for d in title["disks"] for s in d["sides"]])))
+def classify_boot(args: argparse.Namespace, names: str, drive1: str, drive2: str | None) -> dict:
+    """Pick II+ vs //e from headless boots and file-name hints (library sweep and T1 wrap)."""
+    names_iie = bool(IIE_HINT.search(names))
     plus = run_boot(args, "iiplus", drive1, drive2)
     record = {"iiplus": plus.as_dict()}
     if plus.booted and not names_iie:
@@ -193,6 +190,15 @@ def classify(args: argparse.Namespace, title: dict) -> dict:
         return {**record, "requirement": REQUIREMENT_NOBOOT, "detail": plus.detail}
     return {**record, "requirement": REQUIREMENT_UNKNOWN,
             "detail": f"did not boot. II+: {plus.detail}; //e: {iie.detail}"}
+
+
+def classify(args: argparse.Namespace, title: dict) -> dict:
+    disks = os.path.join(args.library, "disks")
+    drive1 = os.path.join(disks, title["boot"]["drive1"])
+    drive2 = os.path.join(disks, title["boot"]["drive2"]) if title["boot"]["drive2"] else None
+    names = " ".join([title["title"]] + title["notes"]
+                       + [s["file"] for d in title["disks"] for s in d["sides"]])
+    return classify_boot(args, names, drive1, drive2)
 
 
 def file_sha256(path: str) -> str:

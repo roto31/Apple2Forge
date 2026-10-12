@@ -25,6 +25,7 @@ readonly PATCH_FILES=(
   "${REPO_ROOT}/vendor/patches/a2emu-menu-bar.patch"
   "${REPO_ROOT}/vendor/patches/a2emu-smooth-display.patch"
   "${REPO_ROOT}/vendor/patches/a2emu-overlay.patch"
+  "${REPO_ROOT}/vendor/patches/a2emu-disk-menu.patch"
 )
 readonly SNAPSHOT_FILES_SUFFIXES=("" ".regs" ".lc" ".disk")
 readonly TEXT_PAGE_TOOL="${REPO_ROOT}/tests/tools/text_page.py"
@@ -155,6 +156,9 @@ if ! grep -q "is_prodos_order" "${SRC_DIR}/lib/a2io/disk2.c"; then
 fi
 if ! grep -q "NSWindowStyleMaskNonactivatingPanel" "${SRC_DIR}/include/apple2tc/sokol/sokol_app.h"; then
   fail_gate "Gate 2: Apply patches" "${gate_start}" "Non-activating emulator window (menu-bar fix) missing after patching."
+fi
+if ! grep -q "disk-set" "${SRC_DIR}/lib/engine6502/engine6502.cpp"; then
+  fail_gate "Gate 2: Apply patches" "${gate_start}" "T1 disk menu (--disk-set) code missing after patching."
 fi
 pass_gate "Gate 2: Apply patches" "${gate_start}"
 

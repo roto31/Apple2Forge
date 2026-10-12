@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Stage 2: build a T1 ("Wrap") macOS app for one disk image.
-# The app holds a launcher script, the ROM-free + Language Card a2emu, a copy
-# of the disk, the personal-use notice and third-party licenses. It reads the
+# Stage 2: build a T1 ("Wrap") macOS app for one or more disk images (all sides).
+# The app holds a launcher script, the ROM-free + Language Card a2emu, bundled
+# disks, the personal-use notice and third-party licenses. It reads the
 # operator's ROM from ~/Library/Application Support at launch. Ad-hoc signed.
 # Output: work/<disk-slug>/t1/<Name>.app
 # Exit codes: 0 success, 1 gate failed, 2 config error, 3 missing dependency.
@@ -16,6 +16,9 @@ readonly LAUNCHER="${REPO_ROOT}/tools/t1/launcher.sh"
 readonly NOTICE="${REPO_ROOT}/tools/t1/NOTICE.txt"
 readonly ROM_FILE="${REPO_ROOT}/roms/apple2plus.rom"
 readonly PIN_FILE="${REPO_ROOT}/vendor/apple2tc.COMMIT"
+readonly DISK_SET_TOOL="${REPO_ROOT}/tools/lib/t1_disk_set.py"
+readonly MACHINE_TOOL="${REPO_ROOT}/tools/lib/t1_machine.py"
+readonly DEFAULT_ROM_DIR="${HOME}/Library/Application Support/Apple2Forge/roms"
 readonly LICENSE_SOURCES=(
   "${REPO_ROOT}/vendor/apple2tc/LICENSE:apple2tc-LICENSE.txt"
   "${REPO_ROOT}/vendor/apple2tc/LICENSE_sokol:sokol-LICENSE.txt"
@@ -32,34 +35,51 @@ source "${REPO_ROOT}/tools/lib/gates.sh"
 
 usage() {
   cat <<'EOF'
-Usage: tools/20_wrap_t1.sh DISK_IMAGE [--name "App Name"] [--dry-run] [--help]
+Usage: tools/20_wrap_t1.sh DISK_IMAGE [DISK2 ...] [--name "App Name"] [--model auto|iiplus|iie]
+       [--rom-dir DIR] [--dry-run] [--help]
 
 Builds work/<disk-slug>/t1/<App Name>.app: a T1 (emulator wrap) app that
-boots DISK_IMAGE. Needs tools/15_build_a2emu_norom.sh to have run. Runs the
-Stage 1 analyzer if work/<disk-slug>/analysis.json is missing.
+boots the first side and bundles every listed disk/side. Needs
+tools/15_build_a2emu_norom.sh to have run. Runs the Stage 1 analyzer on the
+boot side if work/<disk-slug>/analysis.json is missing.
 An existing app of the same name is moved to <App Name>.app.backup-<time>.
 
-  --name NAME  App name (default: the disk file name without extension)
-  --dry-run    Show what would be built; change nothing.
+  --name NAME     App name (default: parsed title or first disk base name)
+  --model M       iiplus, iie, or auto (default: auto — headless boot test)
+  --rom-dir DIR   ROM folder for machine auto-select (default: ~/Library/.../roms)
+  --dry-run       Show what would be built; change nothing.
 EOF
 }
 
-disk=""
+disks=()
 app_name=""
+MODEL="auto"
+rom_dir="${DEFAULT_ROM_DIR}"
 DRY_RUN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
     --name) app_name="${2:?--name needs a value}"; shift 2 ;;
+    --model=*) MODEL="${1#*=}"; shift ;;
+    --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
+    --rom-dir=*) rom_dir="${1#*=}"; shift ;;
+    --rom-dir) rom_dir="${2:?--rom-dir needs a value}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -*) echo "ERROR: unknown option $1" >&2; usage >&2; exit 2 ;;
-    *)
-      if [[ -n "${disk}" ]]; then echo "ERROR: only one disk image" >&2; exit 2; fi
-      disk="$1"; shift ;;
+    *) disks+=("$1"); shift ;;
   esac
 done
-if [[ -z "${disk}" ]]; then usage >&2; exit 2; fi
-if [[ -z "${app_name}" ]]; then app_name="$(basename "${disk}" | sed -E 's/\.[^.]+$//')"; fi
+if [[ ${#disks[@]} -eq 0 ]]; then usage >&2; exit 2; fi
+case "${MODEL}" in auto|iiplus|iie) ;; *) echo "ERROR: --model must be auto, iiplus, or iie" >&2; exit 2 ;; esac
+
+disk_set_json=""
+if ! disk_set_json="$(python3 -I "${DISK_SET_TOOL}" "${disks[@]}")"; then
+  echo "ERROR: could not order disk images (overlapping disk/side labels?)" >&2
+  exit 2
+fi
+disk="$(python3 -I -c 'import json,sys; print(json.load(sys.stdin)["bootPath"])' <<<"${disk_set_json}")"
+parsed_title="$(python3 -I -c 'import json,sys; print(json.load(sys.stdin)["title"])' <<<"${disk_set_json}")"
+if [[ -z "${app_name}" ]]; then app_name="${parsed_title}"; fi
 if [[ "${app_name}" == */* || "${app_name}" == .* ]]; then
   echo "ERROR: --name must not contain '/' or start with '.'" >&2; exit 2
 fi
@@ -73,7 +93,7 @@ readonly STAGING="${OUT_DIR}/.staging/${app_name}.app"
 readonly BUNDLE_ID="org.apple2forge.t1.${slug}"
 
 mkdir -p "${LOG_DIR}"
-echo "=== 20_wrap_t1.sh $(date '+%Y-%m-%d %H:%M:%S %z') disk=${disk} name=${app_name}" >> "${LOG_FILE}"
+echo "=== 20_wrap_t1.sh $(date '+%Y-%m-%d %H:%M:%S %z') disks=${#disks[@]} name=${app_name}" >> "${LOG_FILE}"
 
 sha256_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
@@ -85,10 +105,13 @@ for tool in codesign plutil python3 shasum ditto; do
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing ${tool} (xcode-select --install)." 3
   fi
 done
-if [[ ! -r "${disk}" ]]; then
-  fail_gate "Gate 0: Inputs" "${gate_start}" "Cannot read disk image: ${disk}" 2
-fi
-for needed in "${EMULATOR}" "${EMULATOR_INFO}" "${LAUNCHER}" "${NOTICE}" "${ROM_FILE}" "${PIN_FILE}"; do
+for d in "${disks[@]}"; do
+  if [[ ! -r "${d}" ]]; then
+    fail_gate "Gate 0: Inputs" "${gate_start}" "Cannot read disk image: ${d}" 2
+  fi
+done
+for needed in "${EMULATOR}" "${EMULATOR_INFO}" "${LAUNCHER}" "${NOTICE}" "${ROM_FILE}" "${PIN_FILE}" \
+  "${DISK_SET_TOOL}" "${MACHINE_TOOL}"; do
   if [[ ! -r "${needed}" ]]; then
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing ${needed#"${REPO_ROOT}"/}. Emulator: tools/15_build_a2emu_norom.sh; ROM: tools/05_fetch_rom.sh." 2
   fi
@@ -96,16 +119,20 @@ done
 if ! grep -q "a2emu-language-card.patch" "${EMULATOR_INFO}"; then
   fail_gate "Gate 0: Inputs" "${gate_start}" "build/a2emu-norom/a2emu predates the Language Card patch. Rebuild: tools/15_build_a2emu_norom.sh" 2
 fi
+if ! grep -q "a2emu-disk-menu.patch" "${EMULATOR_INFO}"; then
+  fail_gate "Gate 0: Inputs" "${gate_start}" "build/a2emu-norom/a2emu predates the T1 disk menu. Rebuild: tools/15_build_a2emu_norom.sh" 2
+fi
 for entry in "${LICENSE_SOURCES[@]}"; do
   if [[ ! -r "${entry%%:*}" ]]; then
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing license file ${entry%%:*}. Run tools/00_setup.sh." 2
   fi
 done
-echo "    disk: ${disk}"
+echo "    boot: ${disk}"
+echo "    sides: ${#disks[@]}"
 echo "    app:  ${APP_PATH#"${REPO_ROOT}"/}"
 pass_gate "Gate 0: Inputs" "${gate_start}"
 
-# ── Gate 1: analysis says the disk is supported ─────────────────────
+# ── Gate 1: analysis says the boot side is supported ────────────────
 gate_start="$(date +%s)"
 echo "[Gate 1] Stage 1 analysis"
 if [[ ! -f "${ANALYSIS}" ]]; then
@@ -120,17 +147,36 @@ if [[ -f "${ANALYSIS}" ]]; then
   if [[ "${supported}" != "True" ]]; then
     fail_gate "Gate 1: Analysis" "${gate_start}" "Stage 1 marks this disk unsupported; see ${WORK_DIR#"${REPO_ROOT}"/}/analysis.md." 2
   fi
-  if [[ "$(/usr/bin/stat -f %z "${disk}")" -ne "${SUPPORTED_DISK_BYTES}" ]]; then
-    fail_gate "Gate 1: Analysis" "${gate_start}" "Disk is not a 140K sector image." 2
-  fi
 fi
+while IFS= read -r side_path; do
+  if [[ "$(/usr/bin/stat -f %z "${side_path}")" -ne "${SUPPORTED_DISK_BYTES}" ]]; then
+    fail_gate "Gate 1: Analysis" "${gate_start}" "${side_path} is not a 140K sector image." 2
+  fi
+done < <(python3 -I -c 'import json,sys; [print(s["path"]) for s in json.load(sys.stdin)["sides"]]' <<<"${disk_set_json}")
 pass_gate "Gate 1: Analysis" "${gate_start}"
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
-  echo "[dry-run] would assemble, sign and verify ${APP_PATH#"${REPO_ROOT}"/}"
+  echo "[dry-run] disk set:"
+  python3 -I -c 'import json,sys; [print(f"  {s[\"label\"]} -> {s[\"bundleFile\"]}") for s in json.load(sys.stdin)["sides"]]' <<<"${disk_set_json}"
+  echo "[dry-run] would run Gate 1b machine (${MODEL}) and assemble ${APP_PATH#"${REPO_ROOT}"/}"
   print_summary "PASSED (dry run)"
   exit 0
 fi
+
+# ── Gate 1b: machine (II+ vs //e) ───────────────────────────────────
+gate_start="$(date +%s)"
+echo "[Gate 1b] Machine (${MODEL})"
+machine_json=""
+machine_args=(--emulator "${EMULATOR}" --rom-dir "${rom_dir}" --model "${MODEL}")
+while IFS= read -r side_path; do machine_args+=("${side_path}"); done \
+  < <(python3 -I -c 'import json,sys; d=json.load(sys.stdin)["sides"]; print(d[0]["path"]); print(d[1]["path"] if len(d)>1 else "")' <<<"${disk_set_json}" | sed '/^$/d')
+if ! machine_json="$(python3 -I "${MACHINE_TOOL}" "${machine_args[@]}")"; then
+  fail_gate "Gate 1b: Machine" "${gate_start}" "Could not choose Apple II model; see log and install ROMs in ${rom_dir}." 2
+fi
+A2N_MACHINE="$(python3 -I -c 'import json,sys; print(json.load(sys.stdin)["machine"])' <<<"${machine_json}")"
+A2N_MACHINE_REASON="$(python3 -I -c 'import json,sys; print(json.load(sys.stdin)["detail"])' <<<"${machine_json}")"
+echo "    machine: ${A2N_MACHINE} (${A2N_MACHINE_REASON})"
+pass_gate "Gate 1b: Machine" "${gate_start}"
 
 # ── Gate 2: assemble bundle in staging ──────────────────────────────
 gate_start="$(date +%s)"
@@ -140,8 +186,18 @@ mkdir -p "${STAGING}/Contents/MacOS" "${STAGING}/Contents/Resources/licenses"
 cp "${LAUNCHER}" "${STAGING}/Contents/MacOS/launcher"
 cp "${EMULATOR}" "${STAGING}/Contents/MacOS/a2emu"
 chmod 0755 "${STAGING}/Contents/MacOS/launcher" "${STAGING}/Contents/MacOS/a2emu"
-cp "${disk}" "${STAGING}/Contents/Resources/disk.dsk"
-chmod 0444 "${STAGING}/Contents/Resources/disk.dsk"
+python3 -I - "${disk_set_json}" "${STAGING}/Contents/Resources" <<'PY'
+import json, os, shutil, sys
+data = json.load(sys.stdin)
+resources = sys.argv[1]
+tsv = os.path.join(resources, "disks.tsv")
+with open(tsv, "w", encoding="utf-8") as handle:
+    for side in data["sides"]:
+        dest = os.path.join(resources, side["bundleFile"])
+        shutil.copy2(side["path"], dest)
+        os.chmod(dest, 0o444)
+        handle.write(f"{side['startupDrive']}\t{side['label']}\t{side['bundleFile']}\n")
+PY
 cp "${NOTICE}" "${STAGING}/Contents/Resources/NOTICE.txt"
 for entry in "${LICENSE_SOURCES[@]}"; do
   cp "${entry%%:*}" "${STAGING}/Contents/Resources/licenses/${entry##*:}"
@@ -165,10 +221,29 @@ plutil -insert LSApplicationCategoryType -string "public.app-category.games" "${
 plutil -insert NSHighResolutionCapable -bool true "${plist}"
 plutil -insert NSHumanReadableCopyright -string "Personal-use build. Do not distribute; see NOTICE.txt." "${plist}"
 plutil -insert A2NTier -string "T1" "${plist}"
-plutil -insert A2NEngine -string "a2emu (apple2tc $(cut -c1-12 "${PIN_FILE}")) + Apple2Forge patches: require-rom, language-card" "${plist}"
+engine_note="a2emu (apple2tc $(cut -c1-12 "${PIN_FILE}")) + Apple2Forge patches: require-rom, language-card, disk-menu"
+if [[ "${A2N_MACHINE}" == "iie" ]]; then engine_note+=", iie"; fi
+plutil -insert A2NEngine -string "${engine_note}" "${plist}"
 plutil -insert A2NDiskSHA256 -string "${disk_sha}" "${plist}"
 plutil -insert A2NAnalysisSHA256 -string "${analysis_sha}" "${plist}"
-plutil -insert A2NRomPath -string "~/Library/Application Support/Apple2Forge/roms/apple2plus.rom" "${plist}"
+plutil -insert A2NMachine -string "${A2N_MACHINE}" "${plist}"
+plutil -insert A2NMachineReason -string "${A2N_MACHINE_REASON}" "${plist}"
+if [[ "${A2N_MACHINE}" == "iie" ]]; then
+  plutil -insert A2NRomPaths -json '["~/Library/Application Support/Apple2Forge/roms/apple2e-enhanced.rom","~/Library/Application Support/Apple2Forge/roms/apple2e-video.rom"]' "${plist}"
+else
+  plutil -insert A2NRomPath -string "~/Library/Application Support/Apple2Forge/roms/apple2plus.rom" "${plist}"
+fi
+python3 -I - "${plist}" "${disk_set_json}" <<'PY'
+import json, plistlib, sys
+with open(sys.argv[1], "rb") as handle:
+    info = plistlib.load(handle)
+info["A2NDiskSet"] = [
+    {"label": s["label"], "file": s["bundleFile"], "sha256": s["sha256"]}
+    for s in json.loads(sys.argv[2])["sides"]
+]
+with open(sys.argv[1], "wb") as handle:
+    plistlib.dump(info, handle)
+PY
 if ! plutil -lint "${plist}" >>"${LOG_FILE}" 2>&1; then
   fail_gate "Gate 2: Assemble bundle" "${gate_start}" "Info.plist failed plutil -lint; see log."
 fi
@@ -177,19 +252,26 @@ pass_gate "Gate 2: Assemble bundle" "${gate_start}"
 # ── Gate 3: no ROM bytes anywhere in the bundle ─────────────────────
 gate_start="$(date +%s)"
 echo "[Gate 3] No ROM bytes in the bundle"
-if ! python3 -I - "${ROM_FILE}" "${STAGING}" <<'PY' >>"${LOG_FILE}" 2>&1
+rom_scan=( "${ROM_FILE}" )
+for extra in "${rom_dir}/apple2e-enhanced.rom" "${rom_dir}/apple2e-video.rom"; do
+  [[ -r "${extra}" ]] && rom_scan+=( "${extra}" )
+done
+if ! python3 -I - "${STAGING}" "${rom_scan[@]}" <<'PY' >>"${LOG_FILE}" 2>&1
 import os, sys
-rom = open(sys.argv[1], "rb").read()
 WINDOW = 256
-windows = [rom[off:off + WINDOW] for off in range(0, len(rom), WINDOW)]
+roms = []
+for path in sys.argv[2:]:
+    data = open(path, "rb").read()
+    roms.append((path, [data[off:off + WINDOW] for off in range(0, len(data), WINDOW)]))
 hits = []
-for folder, _, files in os.walk(sys.argv[2]):
+for folder, _, files in os.walk(sys.argv[1]):
     for name in files:
         path = os.path.join(folder, name)
         data = open(path, "rb").read()
-        found = sum(window in data for window in windows)
-        if found:
-            hits.append(f"{path}: {found}/{len(windows)}")
+        for rom_path, windows in roms:
+            found = sum(w in data for w in windows)
+            if found:
+                hits.append(f"{path}: {rom_path} {found}/{len(windows)}")
 print("ROM windows found:", hits or "none")
 sys.exit(1 if hits else 0)
 PY

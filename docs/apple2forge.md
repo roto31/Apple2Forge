@@ -41,13 +41,13 @@ On first launch, and when you choose **Run Again**, the Build tab's **Setup chec
 
 ### Build a disk
 
-1. Drop `.dsk`, `.do`, `.po` or `.nib` images on the Build tab, or on the Apple2Forge icon in the Dock or Finder. **Choose Disk Images…** does the same. Other files are refused with a message.
-2. Each disk gets a card. Disks build one at a time, through these stages:
+1. Drop `.dsk`, `.do`, `.po` or `.nib` images on the Build tab, or on the Apple2Forge icon in the Dock or Finder. **Choose Disk Images…** does the same. Other files are refused with a message. Disks that share a title (for example Side A and Side B) are grouped into **one** card and **one** T1 app with every side.
+2. Each title gets a card (one disk still works as before). Builds run one at a time, through these stages:
 
    | Stage | Script run in the project folder | When |
    |---|---|---|
    | Analyze | `tools/10_analyze.sh` | Always |
-   | Wrap (T1) | `tools/20_wrap_t1.sh` | Always, if Analyze marks the disk supported |
+   | Wrap (T1) | `tools/20_wrap_t1.sh` (all sides, `--model=auto`, your ROM folder) | Always, if Analyze marks the boot side supported |
    | Capture | `tools/30_capture.sh` | Only with **Try T2**, for a disk with a T2 profile |
    | Coverage | `tools/40_coverage.sh` (the profile's sessions) | Same |
    | Recompile (T2) | `tools/50_recompile.sh`, then `tools/55_wrap_t2.sh` | Same |

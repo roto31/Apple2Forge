@@ -15,10 +15,15 @@ Moving the mouse over the game shows a row of buttons at the bottom of the pictu
 | Picture | The next colour mode, like F3 |
 | Sound | Sound off or on. Also turns sound on for a game started with sound off in Settings. |
 | Full screen | Full screen, or back to a window |
+| Disk (T1 apps only) | The same menu as **Disk** in the menu bar: bundled sides, eject, or **Other Disk Image…** |
 
 Restart uses the disks the title started with. If you changed disks with the **Disk** menu, the Disk menu still shows the new ones after a restart; choose them again from the menu to put them back in.
 
 To always show the buttons, or to hide them, choose **Apple2Forge ▸ Settings…**, then **Controls**.
+
+## Changing disks in a T1 app
+
+Standalone T1 apps you built with `tools/20_wrap_t1.sh` include a **Disk** menu in the menu bar (and the overlay **Disk** button). Use **Insert into Drive 1** or **Insert into Drive 2** to pick a bundled side, or **Other Disk Image…** for any 140K `.dsk`, `.do` or `.po` on your Mac. **Eject** empties a drive. Swaps take effect on the next emulated frame, like Apple2Forge's Disk menu.
 
 ## Keyboard
 

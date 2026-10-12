@@ -1,7 +1,7 @@
-"""Boot a T1 app's own emulator and disk headless on the Apple II+ and report whether it starts.
+"""Boot a T1 app's own emulator and disk headless and report whether it starts.
 
 Usage: python3 -I tools/lib/t1_boot_check.py --app PATH.app --rom-dir DIR [--frames N]
-Prints one JSON line: {"app", "booted", "detail"}. Exit 0 booted, 1 did not boot,
+Prints one JSON line: {"app", "booted", "detail", "machine"}. Exit 0 booted, 1 did not boot,
 2 bad input or an app too old to check ("booted": null).
 
 The judgement is the library compatibility sweep's (compat_sweep.judge): after --frames
@@ -11,6 +11,7 @@ or the Disk II boot ROM. It shows the disk starts; it does not play the program.
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 # Run with python3 -I, which leaves this script's folder off the import path.
@@ -19,20 +20,46 @@ import compat_sweep  # noqa: E402
 
 EMULATOR_IN_BUNDLE = os.path.join("Contents", "MacOS", "a2emu")
 DISK_IN_BUNDLE = os.path.join("Contents", "Resources", "disk.dsk")
-ROM_NAME = "apple2plus.rom"
-# a2emu builds from before the snapshot-frame patch reject the option the check needs.
+DISK_SET_IN_BUNDLE = os.path.join("Contents", "Resources", "disks.tsv")
+INFO_PLIST = os.path.join("Contents", "Info.plist")
+ROM_IIPLUS = "apple2plus.rom"
+ROM_IIE = ("apple2e-enhanced.rom", "apple2e-video.rom")
 OLD_EMULATOR_MESSAGE = "Invalid option '--snapshot-frame"
 
 
-def bundle_paths(app: str) -> tuple[str, str]:
-    """Return (emulator, disk) inside a T1 app; ValueError if the layout is not a T1 app's."""
+def plist_machine(app: str) -> str:
+    try:
+        out = subprocess.run(
+            ["plutil", "-extract", "A2NMachine", "raw", "-o", "-", os.path.join(app, INFO_PLIST)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        machine = out.stdout.strip()
+        return machine if machine in ("iiplus", "iie") else "iiplus"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "iiplus"
+
+
+def bundle_paths(app: str) -> tuple[str, str, str | None]:
+    """Return (emulator, disk1, disk2 or None); ValueError if not a T1 app."""
     emulator = os.path.join(app, EMULATOR_IN_BUNDLE)
-    disk = os.path.join(app, DISK_IN_BUNDLE)
+    disk1 = os.path.join(app, DISK_IN_BUNDLE)
     if not os.path.isfile(emulator) or not os.access(emulator, os.X_OK):
         raise ValueError(f"{app} has no executable {EMULATOR_IN_BUNDLE}; is it a T1 app?")
-    if not os.path.isfile(disk):
+    if not os.path.isfile(disk1):
         raise ValueError(f"{app} has no {DISK_IN_BUNDLE}; is it a T1 app?")
-    return emulator, disk
+    disk2 = None
+    tsv = os.path.join(app, DISK_SET_IN_BUNDLE)
+    if os.path.isfile(tsv):
+        resources = os.path.join(app, "Contents", "Resources")
+        with open(tsv, encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 3 and parts[0] == "2":
+                    disk2 = os.path.join(resources, parts[2])
+                    break
+    return emulator, disk1, disk2
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -46,21 +73,57 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
-        emulator, disk = bundle_paths(args.app)
+        emulator, disk1, disk2 = bundle_paths(args.app)
     except ValueError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
-    if not os.path.isfile(os.path.join(args.rom_dir, ROM_NAME)):
-        print(f"ERROR: no {ROM_NAME} in {args.rom_dir}", file=sys.stderr)
+    machine = plist_machine(args.app)
+    if machine == "iie":
+        for rom in ROM_IIE:
+            if not os.path.isfile(os.path.join(args.rom_dir, rom)):
+                print(
+                    json.dumps(
+                        {
+                            "app": args.app,
+                            "booted": None,
+                            "machine": machine,
+                            "detail": f"no {rom} in {args.rom_dir}; install with tools/05_fetch_rom.sh --install --model=iie",
+                        }
+                    )
+                )
+                return 2
+    elif not os.path.isfile(os.path.join(args.rom_dir, ROM_IIPLUS)):
+        print(
+            json.dumps(
+                {
+                    "app": args.app,
+                    "booted": None,
+                    "machine": machine,
+                    "detail": f"no {ROM_IIPLUS} in {args.rom_dir}; run tools/05_fetch_rom.sh --install",
+                }
+            )
+        )
         return 2
     sweep_args = argparse.Namespace(emulator=emulator, rom_dir=args.rom_dir, frames=args.frames)
-    boot = compat_sweep.run_boot(sweep_args, "iiplus", disk, None)
+    boot = compat_sweep.run_boot(sweep_args, machine, disk1, disk2)
     if OLD_EMULATOR_MESSAGE in boot.detail:
-        print(json.dumps({"app": args.app, "booted": None,
-                          "detail": "the app's emulator predates headless snapshots; "
-                                    "rebuild the app with tools/20_wrap_t1.sh, then check again"}))
+        print(
+            json.dumps(
+                {
+                    "app": args.app,
+                    "booted": None,
+                    "machine": machine,
+                    "detail": "the app's emulator predates headless snapshots; "
+                    "rebuild the app with tools/20_wrap_t1.sh, then check again",
+                }
+            )
+        )
         return 2
-    print(json.dumps({"app": args.app, "booted": boot.booted, "detail": boot.detail}))
+    print(
+        json.dumps(
+            {"app": args.app, "booted": boot.booted, "machine": machine, "detail": boot.detail}
+        )
+    )
     return 0 if boot.booted else 1
 
 

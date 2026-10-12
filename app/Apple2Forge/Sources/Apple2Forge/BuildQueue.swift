@@ -17,9 +17,11 @@ final class BuildItem: Identifiable {
     private static let logTailLength = 6
 
     let id = UUID()
-    let disk: URL
+    let disks: [URL]
+    let displayName: String
     let attemptT2: Bool
     var state = State.waiting
+    var machineLabel: String?
     var stages = Dictionary(uniqueKeysWithValues: BuildStage.allCases.map { ($0, StageStatus.pending) })
     var outputFolder: URL?
     var record: BuildRecord?
@@ -28,12 +30,20 @@ final class BuildItem: Identifiable {
     var isRecording = false
     var message: String?
 
-    init(disk: URL, attemptT2: Bool) {
-        self.disk = disk
+    init(disks: [URL], displayName: String, attemptT2: Bool) {
+        self.disks = disks
+        self.displayName = displayName
         self.attemptT2 = attemptT2
     }
 
-    var name: String { disk.lastPathComponent }
+    var disk: URL { disks[0] }
+
+    var name: String {
+        if disks.count > 1 {
+            return "\(displayName) — \(disks.count) sides"
+        }
+        return displayName
+    }
 
     func apply(_ event: BuildEvent) {
         switch event {
@@ -69,12 +79,32 @@ final class BuildQueue {
     var isBuilding: Bool { pipeline != nil }
 
     func add(_ urls: [URL], attemptT2: Bool = false) {
-        for url in urls {
-            if DiskTypes.accepts(url) {
-                items.append(BuildItem(disk: url, attemptT2: attemptT2))
-            } else {
-                rejections.append("\(url.lastPathComponent) is not a disk image. Apple2Forge takes .dsk, .do, .po and .nib files.")
+        let accepted = urls.filter { DiskTypes.accepts($0) }
+        let rejected = urls.filter { !DiskTypes.accepts($0) }
+        for url in rejected {
+            rejections.append("\(url.lastPathComponent) is not a disk image. Apple2Forge takes .dsk, .do, .po and .nib files.")
+        }
+        guard !accepted.isEmpty else {
+            startNext()
+            return
+        }
+        guard let project = AppSettings.shared.project else {
+            for url in accepted {
+                items.append(BuildItem(disks: [url], displayName: url.deletingPathExtension().lastPathComponent,
+                                       attemptT2: attemptT2))
             }
+            startNext()
+            return
+        }
+        let groups: [DiskBuildGroup] = {
+            do { return try DiskGrouping.groups(for: accepted, project: project) }
+            catch {
+                rejections.append(error.localizedDescription)
+                return DiskGrouping.fallbackSingleGroups(accepted)
+            }
+        }()
+        for group in groups {
+            items.append(BuildItem(disks: group.diskURLs, displayName: group.title, attemptT2: attemptT2))
         }
         startNext()
     }
@@ -119,10 +149,13 @@ final class BuildQueue {
         next.state = .running
         Task {
             // Events arrive on the main queue in order, ahead of this task's resumption.
-            let record = await pipeline.run(disk: next.disk, attemptT2: next.attemptT2) { event in
+            let record = await pipeline.run(disks: next.disks, displayName: next.displayName,
+                                            romDirectory: AppSettings.shared.romDirectory,
+                                            attemptT2: next.attemptT2) { event in
                 DispatchQueue.main.async { MainActor.assumeIsolated { next.apply(event) } }
             }
             next.record = record
+            next.machineLabel = record.machine?.displayName
             next.state = .finished
             loadRecordings(next)
             self.pipeline = nil

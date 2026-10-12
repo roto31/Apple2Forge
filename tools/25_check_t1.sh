@@ -21,8 +21,8 @@ usage() {
   cat <<'EOF'
 Usage: tools/25_check_t1.sh APP.app [--rom-dir=DIR] [--frames=N] [--dry-run] [--help]
 
-Boots the T1 app's bundled emulator and disk without a window on the Apple II+
-and reports whether the disk starts: the screen after N frames (default 1800,
+Boots the T1 app's bundled emulator and disk without a window on the machine
+recorded in the app (Apple ][+ or Apple //e) and reports whether the disk starts: the screen after N frames (default 1800,
 30 s; blank screens are retried to 7200) must not be blank, an error, a bare
 prompt or the Disk II boot ROM. It does not play the program.
 

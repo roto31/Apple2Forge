@@ -1,7 +1,7 @@
 import Foundation
 
-public enum Machine: String, Sendable {
-    case iiPlus
+public enum Machine: String, Sendable, Codable {
+    case iiPlus = "iiplus"
     case iie
 
     /// ROM files this machine needs from the ROM folder. They are installed

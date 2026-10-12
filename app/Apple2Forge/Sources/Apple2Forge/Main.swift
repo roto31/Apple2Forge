@@ -113,7 +113,8 @@ enum Apple2ForgeMain {
         }
         defer { signalSources.forEach { $0.cancel() } }
         Task.detached {
-            let record = await pipeline.run(disk: disk, attemptT2: attemptT2) { event in
+            let record = await pipeline.run(disk: disk, romDirectory: AppSettings.shared.romDirectory,
+                                            attemptT2: attemptT2) { event in
                 switch event {
                 case .started(let slug, let folder): print("== \(slug) → \(folder.path)")
                 case .status(let stage, let stageStatus):

@@ -14,20 +14,20 @@ This page covers what you get, what it needs, the exact steps, how to check the 
 |---|---|
 | A launcher script, which starts the emulator | `Contents/MacOS/launcher` |
 | The patched emulator `a2emu` (Apple ][+ with a 16K Language Card, 64K) | `Contents/MacOS/a2emu` |
-| A read-only copy of your disk | `Contents/Resources/disk.dsk` |
+| Boot disk and any other sides | `Contents/Resources/disk.dsk`, `side-02.dsk`, … and `disks.tsv` |
 | A personal-use notice and the emulator's licences | `Contents/Resources/NOTICE.txt`, `Contents/Resources/licenses/` |
 
 The app is ad-hoc signed. Its `Info.plist` records the disk's SHA-256.
 
-There is **no Apple system ROM** in the app. Each time the app starts, it reads your Apple II+ ROM from `~/Library/Application Support/Apple2Forge/roms/apple2plus.rom`. If the file is missing or the wrong size, it shows an alert and quits.
+There is **no Apple system ROM** in the app. Each time the app starts, it reads the ROMs for the machine recorded in the app (`A2NMachine` in `Info.plist`): Apple II+ from `apple2plus.rom`, or enhanced Apple //e from `apple2e-enhanced.rom` and `apple2e-video.rom`, all under `~/Library/Application Support/Apple2Forge/roms/`. If a file is missing or the wrong size, it shows an alert and quits.
 
 Like Apple2Forge, the emulator inside does contain two small pieces of Apple-derived firmware data from upstream apple2tc: the 256-byte Disk II boot PROM and a 2 KB text font. See [third-party notices](../THIRD_PARTY_NOTICES.md#apple-firmware).
 
 ## What a T1 app is not
 
 - **Not standalone.** It runs only on a Mac that has your Apple II+ ROM installed at the path above. Copying the app alone to another Mac gives the "Apple II ROM not found" alert.
-- **Apple ][+ only.** Disks that need an Apple //e (128K, 80 columns, 65C02) don't run. Apple2Forge's library can run those, but T1 can't.
-- **One disk, no swapping.** The app has one drive with one disk, and no Disk menu. Programs that ask for a second disk or side can't continue.
+- **Apple ][+ or enhanced //e.** With `--model=auto` (the default), the wrap step test-boots your disk on both machines and picks the same way the library sweep does. Use `--model=iiplus` or `--model=iie` to force one machine.
+- **Read-only disks, live swapping.** Every side you pass is bundled read-only. The **Disk** menu and the overlay **Disk** button insert any bundled side (or another 140K image you choose) into drive 1 or 2 while the program runs.
 - **Read-only.** Nothing is saved: scores, records and files written by the program are lost when you quit.
 - **Not tested on every disk.** Only Number Munchers has passed the full automated checks, which include a real windowed launch and a comparison against another emulator. For any other disk, use the [boot check](#4-check-that-it-boots) and try it yourself.
 - **Window title.** The window is titled "a2emu", not the app name.

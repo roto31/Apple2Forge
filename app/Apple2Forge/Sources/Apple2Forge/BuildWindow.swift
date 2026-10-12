@@ -48,7 +48,7 @@ struct BuildWindow: View {
             Image(systemName: "opticaldiscdrive").font(.largeTitle)
             Text("Drop .dsk, .do, .po or .nib disk images here")
                 .font(.headline)
-            Text("Each disk is analyzed and wrapped as a T1 app automatically.")
+            Text("Disks of the same title are wrapped into one T1 app with every side.")
                 .foregroundStyle(.secondary)
             Button("Choose Disk Images…", action: chooseDisks)
         }
@@ -125,6 +125,9 @@ struct PipelineCard: View {
     private var header: some View {
         HStack {
             Text(item.name).font(.headline)
+            if let machine = item.machineLabel {
+                Text(machine).foregroundStyle(.secondary)
+            }
             if item.attemptT2 { Text("with T2").foregroundStyle(.secondary) }
             Spacer()
             switch item.state {

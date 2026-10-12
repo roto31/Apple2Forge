@@ -9,6 +9,9 @@ All notable changes to this project (the native conversion toolkit and the bundl
 
 ## [Unreleased]
 
+### Added
+- T1 apps can bundle every disk and side of a title, pick Apple ][+ or enhanced //e automatically, and swap disks from a **Disk** menu. See [Make a Mac app from your disk](docs/make-a-mac-app-from-your-disk.md), [Playing games — T1 disk menu](docs/playing-games.md#changing-disks-in-a-t1-app), and [Apple2Forge — Build tab](docs/apple2forge.md#build-a-disk).
+
 ## [0.3.0] - 2026-10-11
 
 A cleaner picture by default, buttons over the game, and a new Settings window that can install your ROMs.

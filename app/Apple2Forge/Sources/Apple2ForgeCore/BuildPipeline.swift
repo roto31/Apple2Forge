@@ -61,9 +61,11 @@ public struct BuildRecord: Codable, Sendable, Equatable {
     }
 
     public let disk: String
+    public let disks: [String]?
     public let slug: String
     public let sha256: String
     public let profile: String?
+    public let machine: Machine?
     public let analysis: AnalysisSummary?
     public let stages: [Stage]
     public let report: CompatibilityReport
@@ -110,8 +112,9 @@ public final class BuildPipeline: @unchecked Sendable {
         outputFolder.appending(path: "logs/\(stage.logName).log")
     }
 
-    public func run(disk: URL, attemptT2: Bool,
+    public func run(disks: [URL], displayName: String, romDirectory: URL, attemptT2: Bool,
                     onEvent: @escaping @Sendable (BuildEvent) -> Void) async -> BuildRecord {
+        let disk = disks[0]
         let slug = (try? diskSlug(disk)) ?? "disk"
         let output = buildsRoot.appending(path: slug, directoryHint: .isDirectory)
         setAsidePreviousBuild(in: output)
@@ -140,9 +143,10 @@ public final class BuildPipeline: @unchecked Sendable {
         let profile = (try? BuildProfile.load(from: project.file(ProjectTools.profilesFile)))?
             .first { $0.diskSHA256 == sha }
         let work = project.workDirectory(slug: slug)
-        let baseName = disk.deletingPathExtension().lastPathComponent
+        let baseName = displayName
         let t1App = work.appending(path: "t1/\(baseName).app")
         let t2App = work.appending(path: "t2/\(baseName) (T2-hybrid).app")
+        var wrappedMachine: Machine?
 
         // Analyze
         var analysis: AnalysisSummary?
@@ -157,7 +161,9 @@ public final class BuildPipeline: @unchecked Sendable {
 
         // Wrap (T1)
         if let analysis, analysis.supported {
-            if await runScript(.wrapT1, ProjectTools.wrapT1Script, [disk.path, "--name", baseName]) {
+            let wrapArgs = disks.map(\.path) + ["--name", baseName, "--rom-dir", romDirectory.path]
+            if await runScript(.wrapT1, ProjectTools.wrapT1Script, wrapArgs) {
+                wrappedMachine = Self.machine(in: t1App)
                 set(.wrapT1, .passed)
             }
         } else {
@@ -228,7 +234,8 @@ public final class BuildPipeline: @unchecked Sendable {
         }
 
         let record = BuildRecord(
-            disk: disk.path, slug: slug, sha256: sha, profile: profile?.name, analysis: analysis,
+            disk: disk.path, disks: disks.count > 1 ? disks.map(\.path) : nil, slug: slug, sha256: sha,
+            profile: profile?.name, machine: wrappedMachine, analysis: analysis,
             stages: BuildStage.allCases.map { BuildRecord.Stage(stage: $0, status: stages[$0] ?? .pending) },
             report: report, t1App: products.t1?.path, t2App: products.t2?.path, outputFolder: output.path)
         let encoder = JSONEncoder()
@@ -247,6 +254,20 @@ public final class BuildPipeline: @unchecked Sendable {
         }
         guard attemptT2 else { return "T2 is available for this disk: choose Try T2 (about 9 minutes)" }
         return nil
+    }
+
+    public func run(disk: URL, romDirectory: URL, attemptT2: Bool,
+                    onEvent: @escaping @Sendable (BuildEvent) -> Void) async -> BuildRecord {
+        await run(disks: [disk], displayName: disk.deletingPathExtension().lastPathComponent, romDirectory: romDirectory,
+                  attemptT2: attemptT2, onEvent: onEvent)
+    }
+
+    static func machine(in app: URL) -> Machine? {
+        let plist = app.appending(path: "Contents/Info.plist")
+        guard let data = try? Data(contentsOf: plist),
+              let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let raw = root["A2NMachine"] as? String else { return nil }
+        return Machine(rawValue: raw)
     }
 
     /// The project's own slug rule (tools/lib/gates.sh disk_slug), so paths match the scripts'.
