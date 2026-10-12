@@ -19,6 +19,8 @@ The app opens on the **Build** tab. To play the library, choose the **Library** 
 
 ![The Library menu with the Math submenu open](images/library-menu.png)
 
+On first launch, Apple2Forge can install ROMs and download the library for you ([Getting started — first-run setup](getting-started.md#first-run-setup-roms-and-library)). If you skip the library download, the Library tab shows a banner with **Download Now…** until a catalog exists.
+
 The Library tab is covered in its own guides:
 
 - [Getting started](getting-started.md): install and first launch.
@@ -101,7 +103,7 @@ Rebuilding moves the previous results into `previous-<time>/`. Intermediate file
 |---|---|
 | Picture | **Smooth** (the default: sharp pixels, solid colours) or **Classic** (the softer picture of a colour monitor). See [Playing games](playing-games.md#display-style). |
 | Sound | **Play sound**. Off starts games silent; the sound button over the game turns it on. |
-| Machine | The Apple ][+, Apple //e and //e video ROMs, each with **Choose…** and **Restore Previous** (see [Installing ROMs](installing-roms.md#option-3-in-settings)); **Speed**, Normal or Fast (5×); and **Start in joystick mode**. |
+| Machine | The Apple ][+, Apple //e and //e video ROMs, each with **Choose…** and **Restore Previous** (see [Installing ROMs](installing-roms.md#option-4-in-settings)); **Speed**, Normal or Fast (5×); and **Start in joystick mode**. |
 | Controls | When the [buttons over the game](playing-games.md#buttons-over-the-game) appear: **Show when the mouse moves** (the default), **Always show** or **Hide**. |
 | Build | The project folder (**Choose…**, **Show Work Folder**, the pinned apple2tc commit), the ROM the builds use, the builds folder, and the same setup checklist as the Build tab. |
 

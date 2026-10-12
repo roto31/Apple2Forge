@@ -27,6 +27,15 @@ final class AppSettings: @unchecked Sendable {
     private(set) var buildT2OnDrop = false
     /// Quit this many seconds after the queue empties (--quit-after-build).
     private(set) var quitAfterBuildSeconds: Double?
+    private(set) var skipFirstRun = false
+
+    var skipAutomationHooks: Bool {
+        launchTitleID != nil || !dropPaths.isEmpty
+    }
+
+    func configureFirstRun(skip: Bool) {
+        skipFirstRun = skip
+    }
 
     func configure(suite: String?, libraryOverride: String?, launchTitleID: String? = nil,
                    swapAfter: String? = nil) {

@@ -28,14 +28,23 @@ The app is ad-hoc signed and not notarized by Apple, so macOS blocks the first l
 
 After that it opens normally.
 
+## First-run setup (ROMs and library)
+
+The first time Apple2Forge opens after macOS lets it run, it asks two questions:
+
+1. **ROMs** — You can download and install the Apple ][+ and enhanced //e ROMs automatically (from the same mirror as [Installing ROMs](installing-roms.md#option-2-with-the-script-recommended-for-developers)), choose your own ROM files with the file picker, or skip for now. Use ROMs only if you are entitled to.
+2. **Educational library** — You can download the games and applications to the default folder (`~/Library/Application Support/Apple2Forge/library/`), or choose **Not Now**. If you skip, the **Library** tab shows a reminder and **Download Now…**; you can also use **Library ▸ Download Educational Library…** any time.
+
+This setup runs once. To see it again, delete the `firstRunCompleted` key from Apple2Forge's preferences, or pass `--skip-first-run` when launching from Terminal to bypass it (for scripts and tests).
+
 ## First steps
 
 ![Apple2Forge's Build tab with its setup check](images/build-tab-setup-check.png)
 
 Apple2Forge opens on its **Build** tab, which turns disk images into Mac apps. It needs a source checkout of this repository, and its setup check says "Project folder: not found" until you choose one in **Settings**. See [Apple2Forge](apple2forge.md#build-tab). To play the library, you don't need it: use the **Library** tab or menu.
 
-1. **Install the ROMs**: see [Installing ROMs](installing-roms.md). Without them, titles can't start, and the post-download check that picks each title's machine is skipped.
-2. **Download the library**: choose **Library ▸ Download Educational Library…**, then pick **Use Default Location** (`~/Library/Application Support/Apple2Forge/library/`) or **Choose Location…**. The main window shows progress; see [Educational library](library.md).
+1. **Install the ROMs**: the first-run dialog can do this for you, or see [Installing ROMs](installing-roms.md). Without them, titles can't start, and the post-download check that picks each title's machine is skipped.
+2. **Download the library**: the first-run dialog can download to the default location, or choose **Library ▸ Download Educational Library…** later. The main window shows progress; see [Educational library](library.md).
 3. **Play**: choose a subject in the **Library** menu, then a title. The game opens in its own window. See [Playing games](playing-games.md).
 
 ## Where Apple2Forge keeps things

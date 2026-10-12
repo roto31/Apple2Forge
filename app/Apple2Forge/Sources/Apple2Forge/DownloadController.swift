@@ -35,6 +35,13 @@ final class DownloadController {
         guard let folder = chooseLocation(message: "Where should the educational library be saved?",
                                           info: "About 330 MB of disk images. The default is your Application Support folder.")
         else { return false }
+        return startDownload(library: library, to: folder)
+    }
+
+    /// Saves `folder` as the library location and runs download → catalog → sweep.
+    @discardableResult
+    func startDownload(library: LibraryModel, to folder: URL) -> Bool {
+        guard !isRunning else { return true }
         guard pythonIsAvailable() else {
             state = .failed("python3 is missing. Install the Xcode command-line tools (xcode-select --install), then try again.")
             return true
@@ -43,6 +50,13 @@ final class DownloadController {
             state = .failed("The bundled download scripts are missing. Rebuild Apple2Forge.app (tools/60_build_app.sh).")
             return true
         }
+        do {
+            try AppSettings.shared.locationStore.save(folder)
+        } catch {
+            state = .failed(error.localizedDescription)
+            return true
+        }
+        FirstRunState(defaults: AppSettings.shared.defaults).clearLibraryDeclined()
         library.reload()
         let pipeline = DownloadPipeline(tools: tools, library: folder, romDirectory: AppSettings.shared.romDirectory)
         run(pipeline, library: library) { try await pipeline.run(onEvent: $0) }

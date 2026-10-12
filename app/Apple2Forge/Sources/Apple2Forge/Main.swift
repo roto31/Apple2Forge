@@ -19,6 +19,7 @@ import Foundation
 ///   --swap-after=S:D:PATH    S seconds later, insert disks/PATH into drive D, as the Disk menu does.
 ///   --drop=PATH              Queue PATH as a drop on the Build tab does (repeatable; --t2 tries T2).
 ///   --quit-after-build=S     Quit S seconds after the build queue empties.
+///   --skip-first-run         Do not show the first-launch ROM and library setup.
 @main
 enum Apple2ForgeMain {
     static func main() {
@@ -33,6 +34,11 @@ enum Apple2ForgeMain {
                                               buildsDirectory: options.value("--builds-dir"),
                                               drops: options.values("--drop"), t2: options.has("--t2"),
                                               quitAfterBuild: options.value("--quit-after-build"))
+        AppSettings.shared.configureFirstRun(
+            skip: options.has("--skip-first-run")
+                || options.value("--launch") != nil
+                || !options.values("--drop").isEmpty
+        )
         if let status = runCommandLineMode(options) {
             exit(status)
         }

@@ -16,10 +16,8 @@ readonly IIE_VIDEO_ROM_SIZE_BYTES=4096
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly REPO_ROOT
-readonly ROM_DIR="${REPO_ROOT}/roms"
-readonly INSTALL_DIR="${HOME}/Library/Application Support/Apple2Forge/roms"
-readonly LOG_DIR="${REPO_ROOT}/work/_logs"
-readonly LOG_FILE="${LOG_DIR}/05_fetch_rom.log"
+WORK_ROOT="${REPO_ROOT}"
+INSTALL_DIR="${HOME}/Library/Application Support/Apple2Forge/roms"
 
 DRY_RUN=0
 INSTALL=0
@@ -49,10 +47,15 @@ Usage: tools/05_fetch_rom.sh [--model=iiplus|iie] [--install] [--dry-run] [--hel
 
 roms/ is Git-ignored.
 
-  --install   Also copy the ROM(s) to
-              ~/Library/Application Support/Apple2Forge/roms/, where generated
-              apps load them at launch. A different file already there is
-              backed up first (.backup-YYYYMMDD_HHMMSS).
+  --install   Also copy the ROM(s) to the install folder (see --install-dir),
+              where generated apps load them at launch. A different file
+              already there is backed up first (.backup-YYYYMMDD_HHMMSS).
+  --work-dir=DIR
+              Writable folder for roms/ and work/_logs (default: repo root, or
+              the app bundle's Resources when run from Apple2Forge.app).
+  --install-dir=DIR
+              Destination for --install (default: ~/Library/Application
+              Support/Apple2Forge/roms).
   --dry-run   Show what would be downloaded; change nothing.
   --help      Show this help.
 
@@ -67,9 +70,17 @@ for arg in "$@"; do
     --dry-run) DRY_RUN=1 ;;
     --install) INSTALL=1 ;;
     --model=iiplus|--model=iie) MODEL="${arg#--model=}" ;;
+    --work-dir=*) WORK_ROOT="${arg#--work-dir=}" ;;
+    --install-dir=*) INSTALL_DIR="${arg#--install-dir=}" ;;
     *) echo "ERROR: unknown option '${arg}'" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+readonly WORK_ROOT
+readonly ROM_DIR="${WORK_ROOT}/roms"
+readonly LOG_DIR="${WORK_ROOT}/work/_logs"
+readonly LOG_FILE="${LOG_DIR}/05_fetch_rom.log"
+readonly INSTALL_DIR
 
 # Chips are ordered low address → high; concatenation order matters.
 if [[ "${MODEL}" == "iie" ]]; then
@@ -106,7 +117,7 @@ fi
 readonly ROM_FILE="${ROM_DIR}/${ROM_NAME}"
 readonly ROM_MANIFEST="${ROM_FILE}.sha256"
 readonly INSTALLED_ROM="${INSTALL_DIR}/${ROM_NAME}"
-CHIP_DIR_REL="${CHIP_DIR#"${REPO_ROOT}/"}"
+CHIP_DIR_REL="${CHIP_DIR#"${WORK_ROOT}/"}"
 readonly CHIP_DIR_REL
 
 record_gate() { GATE_NAMES+=("$1"); GATE_STATUS+=("$2"); GATE_SECONDS+=("$3"); }
@@ -328,7 +339,7 @@ fi
 # ── Gate 6: install for apps (optional) ─────────────────────────────
 gate_start="$(date +%s)"
 if [[ "${INSTALL}" -eq 1 ]]; then
-  echo "[Gate 6] Install to ~/Library/Application Support/Apple2Forge/roms/"
+  echo "[Gate 6] Install to ${INSTALL_DIR}/"
   if [[ "${DRY_RUN}" -eq 1 ]]; then
     echo "    would copy roms/${ROM_NAME} → ${INSTALLED_ROM}"
     if [[ -n "${VIDEO_ROM_NAME}" ]]; then echo "    would copy roms/${VIDEO_ROM_NAME} → ${INSTALL_DIR}/"; fi

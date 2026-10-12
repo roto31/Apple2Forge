@@ -6,7 +6,7 @@ Apple2Forge's own code is MIT-licensed ([LICENSE](../LICENSE)). The Apple II fir
 
 | Item | In this repository | In the released app | How you get it |
 |---|---|---|---|
-| Apple ][+ / //e system ROMs | No | No | You install them: [Installing ROMs](installing-roms.md) |
+| Apple ][+ / //e system ROMs | No | No | You install them (first-run dialog, Settings, or script): [Installing ROMs](installing-roms.md) |
 | Disk II boot PROM (256 bytes) | No | **Yes**, compiled into `a2emu` from upstream apple2tc | — |
 | Apple ][ text font (2 KB, from the character-generator ROM) | No | **Yes**, compiled into `a2emu` from upstream apple2tc | — |
 | Educational disk images | No | No | **Library ▸ Download Educational Library…** downloads them onto your Mac |

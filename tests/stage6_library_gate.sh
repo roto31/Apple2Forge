@@ -61,7 +61,7 @@ cleanup() {
 trap cleanup EXIT
 
 app_cli() {
-  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" "$@"
+  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run "$@"
 }
 
 # Picks gate titles from library.json: KIND is "one-disk" or "two-sided".
@@ -87,7 +87,7 @@ PY
 # Starts the app UI with test hooks; leaves APP_PID set.
 start_app() {
   pkill -f "${LAUNCH_LINKS}/" 2>/dev/null || true
-  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" "$@" >> "${LOG_FILE}" 2>&1 &
+  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run "$@" >> "${LOG_FILE}" 2>&1 &
   APP_PID=$!
 }
 

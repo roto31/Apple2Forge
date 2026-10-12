@@ -6,9 +6,14 @@ struct LibraryWindow: View {
     let library: LibraryModel
     let session: EmulatorSession
     let download: DownloadController
+    @AppStorage(FirstRunState.libraryDeclinedKey, store: AppSettings.shared.defaults)
+    private var libraryDownloadDeclined = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if libraryDownloadDeclined && library.catalog == nil {
+                libraryDeclinedBanner
+            }
             libraryStatus
             Divider()
             runningStatus
@@ -40,6 +45,22 @@ struct LibraryWindow: View {
         else { return }
         try? await Task.sleep(for: .seconds(swap.delaySeconds))
         session.insert(side, drive: swap.drive)
+    }
+
+    private var libraryDeclinedBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Educational library not downloaded", systemImage: "info.circle")
+                .font(.headline)
+            Text("You can download the games and applications later from Library ▸ Download Educational Library…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Download Now…") {
+                _ = download.startDownload(library: library, to: LibraryLocation.defaultDirectory)
+            }
+            .disabled(download.isRunning)
+        }
+        .padding(12)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder

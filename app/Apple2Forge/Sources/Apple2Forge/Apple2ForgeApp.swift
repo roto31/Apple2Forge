@@ -7,6 +7,7 @@ struct Apple2ForgeApp: App {
     @State private var library = LibraryModel()
     @State private var session = EmulatorSession()
     @State private var download = DownloadController()
+    @State private var firstRun = FirstRunController()
     /// The Library tab runs the --launch hook when it appears, so it opens first then.
     @State private var tab = AppSettings.shared.launchTitleID == nil ? MainTab.build : .library
 
@@ -19,6 +20,15 @@ struct Apple2ForgeApp: App {
                 LibraryWindow(library: library, session: session, download: download)
                     .tabItem { Text("Library") }
                     .tag(MainTab.library)
+            }
+            .sheet(isPresented: $firstRun.showRomInstallSheet) {
+                RomInstallProgressView(controller: firstRun)
+            }
+            .task {
+                let state = FirstRunState(defaults: AppSettings.shared.defaults)
+                await firstRun.runIfNeeded(state: state, download: download, library: library) {
+                    tab = .library
+                }
             }
         }
         .windowResizability(.contentSize)

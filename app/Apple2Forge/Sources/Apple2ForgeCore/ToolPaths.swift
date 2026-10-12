@@ -8,6 +8,7 @@ public struct ToolPaths: Sendable, Equatable {
     public let root: URL
     public let emulator: URL
 
+    public static let romScript = "tools/05_fetch_rom.sh"
     public static let fetchScript = "tools/07_fetch_edu_library.sh"
     public static let catalogScript = "tools/50_library.sh"
     public static let sweepScript = "tools/55_compat_sweep.sh"

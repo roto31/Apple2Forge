@@ -76,7 +76,7 @@ cleanup() {
 trap cleanup EXIT
 
 app_cli() {
-  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --project="${REPO_ROOT}" "$@"
+  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run --project="${REPO_ROOT}" "$@"
 }
 
 # report_check REPORT_JSON STAGE=STATUS... → 0 if every stage has that status
@@ -205,7 +205,7 @@ else
   builds="${WORK}/ui"
   echo "notes" > "${WORK}/notes.txt"
   defaults write "${DEFAULTS_SUITE}" setupCheckPassed -bool true
-  open -n -a "${APP}" "${DISK}" --args --defaults-suite="${DEFAULTS_SUITE}" --project="${REPO_ROOT}" \
+  open -n -a "${APP}" "${DISK}" --args --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run --project="${REPO_ROOT}" \
     --builds-dir="${builds}" --drop="${WORK}/notes.txt" --quit-after-build="${QUIT_AFTER_BUILD_SECONDS}"
   sleep 2
   APP_PID="$(pgrep -n -f "$(printf '%s' "${APP_BINARY}" | sed 's/[][\.*^$()+?{}|]/\\&/g')" || true)"
@@ -297,7 +297,7 @@ else
   echo "[Gate B8] First run runs the Stage 0 setup check"
   defaults delete "${DEFAULTS_SUITE}" >/dev/null 2>&1 || true
   rm -f "${SETUP_LOG}"
-  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --project="${REPO_ROOT}" >> "${LOG_FILE}" 2>&1 &
+  "${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run --project="${REPO_ROOT}" >> "${LOG_FILE}" 2>&1 &
   APP_PID=$!
   waited=0
   while ! grep -q '^Overall:' "${SETUP_LOG}" 2>/dev/null; do
@@ -343,7 +343,7 @@ gate_start="$(date +%s)"
 echo "[Gate B11] SIGTERM during Coverage stops every child and reports the cancel"
 builds="${WORK}/cancel"
 # Not app_cli: $! must be the app itself, not a subshell running the function.
-"${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --project="${REPO_ROOT}" --builds-dir="${builds}" \
+"${APP_BINARY}" --defaults-suite="${DEFAULTS_SUITE}" --skip-first-run --project="${REPO_ROOT}" --builds-dir="${builds}" \
   --t2 --build="${DISK}" >> "${LOG_FILE}" 2>&1 &
 APP_PID=$!
 waited=0

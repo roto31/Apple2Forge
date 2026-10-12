@@ -22,6 +22,7 @@ readonly ROM_WINDOW_BYTES=256
 # Copied into Contents/Resources with their repo-relative paths, so each
 # script finds its helpers the same way it does in the repo.
 readonly BUNDLED_FILES=(
+  tools/05_fetch_rom.sh
   tools/07_fetch_edu_library.sh
   tools/50_library.sh
   tools/55_compat_sweep.sh

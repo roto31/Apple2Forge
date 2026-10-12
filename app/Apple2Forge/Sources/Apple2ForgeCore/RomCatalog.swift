@@ -139,6 +139,23 @@ public enum RomCatalog {
         return knownChips[slot]?[digest]
     }
 
+    /// Guesses which ROM slot a file belongs to, for the first-run file picker.
+    public static func detectSlot(_ data: Data) -> RomSlot? {
+        if data.count == videoSize { return .iieVideo }
+        if (try? image(from: data, for: .iiPlus)) != nil { return .iiPlus }
+        if (try? image(from: data, for: .iieEnhanced)) != nil { return .iieEnhanced }
+        return nil
+    }
+
+    public static func missingSlots(in romDirectory: URL) -> [RomSlot] {
+        RomSlot.allCases.filter {
+            switch status(of: $0, in: romDirectory) {
+            case .installed: false
+            default: true
+            }
+        }
+    }
+
     public static func status(of slot: RomSlot, in romDirectory: URL) -> RomStatus {
         let file = romDirectory.appending(path: slot.fileName)
         guard let data = try? Data(contentsOf: file) else { return .missing }

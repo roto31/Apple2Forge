@@ -16,7 +16,11 @@ All of them go in `~/Library/Application Support/Apple2Forge/roms/`:
 
 The library's compatibility check needs all three. Without them it is skipped, and each title uses the machine its file name suggests.
 
-## Option 1: with the script (recommended)
+## Option 1: first launch in Apple2Forge
+
+When you open Apple2Forge for the first time, choose **Download and Install** on the ROM question. The app runs the same fetch script as below (Apple ][+ and enhanced //e, including the video ROM) and copies the files into `~/Library/Application Support/Apple2Forge/roms/`. Choose **Choose My Own Files…** to pick ROM images yourself, or **Skip for Now** and use Settings or the script later.
+
+## Option 2: with the script (recommended for developers)
 
 The repository has a script that downloads the original chip images from the Apple II Documentation Project mirror (`mirrors.apple2.org.za`), assembles the ROM files and installs them:
 
@@ -31,7 +35,7 @@ tools/05_fetch_rom.sh --model=iie --install     # enhanced Apple //e + video ROM
 - `--dry-run` shows what would be downloaded, without changing anything.
 - The downloaded chips and assembled ROMs stay in the clone's `roms/` folder, which Git ignores.
 
-## Option 2: by hand
+## Option 3: by hand
 
 If you already have ROM images in the formats above, create the folder and copy them in under exactly these names:
 
@@ -40,7 +44,7 @@ mkdir -p ~/Library/Application\ Support/Apple2Forge/roms
 cp apple2plus.rom apple2e-enhanced.rom apple2e-video.rom ~/Library/Application\ Support/Apple2Forge/roms/
 ```
 
-## Option 3: in Settings
+## Option 4: in Settings
 
 Choose **Apple2Forge ▸ Settings…**, then **Machine**. Each ROM has a **Choose…** button. Apple2Forge checks the file before copying it into the ROM folder:
 

@@ -143,7 +143,7 @@ One older app of the Number Munchers 4am crack was built before the boot check e
 | Message | Cause and fix |
 |---|---|
 | `Missing build/a2emu-norom/a2emu …` (gate 0) | Run `tools/15_build_a2emu_norom.sh`, or `tools/00_setup.sh` first on a new checkout |
-| `Missing roms/apple2plus.rom …` (gate 0) | Run `tools/05_fetch_rom.sh --install`, or put your ROM there by hand: see [Installing ROMs](installing-roms.md#option-2-by-hand) |
+| `Missing roms/apple2plus.rom …` (gate 0) | Run `tools/05_fetch_rom.sh --install`, or put your ROM there by hand: see [Installing ROMs](installing-roms.md#option-3-by-hand) |
 | `… predates the Language Card patch` (gate 0) | Rebuild the emulator with `tools/15_build_a2emu_norom.sh` |
 | `Stage 1 marks this disk unsupported` (gate 1) | The reason is in `work/<disk>/analysis.md`. Usually the image is `.nib`, `.woz` or `.2mg`, or the wrong size |
 | `Disk is not a 140K sector image` (gate 1) | Only 143,360-byte images are supported |

@@ -10,6 +10,7 @@ All notable changes to this project (the native conversion toolkit and the bundl
 ## [Unreleased]
 
 ### Added
+- **First-run setup:** Apple2Forge can download and install ROMs on first launch, or you can choose your own files. It can also download the educational library to the default folder; if you skip that step, the Library tab reminds you with **Download Now…**. See [Getting started](docs/getting-started.md#first-run-setup-roms-and-library) and [Installing ROMs](docs/installing-roms.md#option-1-first-launch-in-apple2forge).
 - T1 apps can bundle every disk and side of a title, pick Apple ][+ or enhanced //e automatically, and swap disks from a **Disk** menu. See [Make a Mac app from your disk](docs/make-a-mac-app-from-your-disk.md), [Playing games — T1 disk menu](docs/playing-games.md#changing-disks-in-a-t1-app), and [Apple2Forge — Build tab](docs/apple2forge.md#build-a-disk).
 
 ## [0.3.0] - 2026-10-11
@@ -20,7 +21,7 @@ A cleaner picture by default, buttons over the game, and a new Settings window t
 - **Smooth picture, now the default.** Sharp, evenly scaled pixels and solid hi-res colours, worked out from the rules in Apple's *Apple //e Technical Reference Manual*. **Classic** keeps the earlier picture, with the colour fringes of a monitor. F3 now cycles smooth, colour, colour (140-pixel), monochrome and monochrome (140-pixel). See [Playing games](docs/playing-games.md#display-style).
 - **Buttons over the game:** Restart, Joystick, Picture, Sound and Full screen. They appear when the mouse moves over the game and fade a few seconds later. They never take your typing away from the game. Restart needs two clicks and isn't shown in T2 apps. See [Playing games](docs/playing-games.md#buttons-over-the-game).
 - **Settings tabs:** Picture, Sound, Machine, Controls and Build. Sound off, Fast (5×) speed and Start in joystick mode apply when a title starts. See [Apple2Forge](docs/apple2forge.md#settings).
-- **ROM picker** on the Machine tab. A chosen file is checked by size and by the Monitor's ID bytes before it's copied in. Files matching Apple's original chips are named by part number. The file it replaces is kept in a backup folder, and **Restore Previous** puts it back. An original (unenhanced) //e or a //c ROM is refused. See [Installing ROMs](docs/installing-roms.md#option-3-in-settings).
+- **ROM picker** on the Machine tab. A chosen file is checked by size and by the Monitor's ID bytes before it's copied in. Files matching Apple's original chips are named by part number. The file it replaces is kept in a backup folder, and **Restore Previous** puts it back. An original (unenhanced) //e or a //c ROM is refused. See [Installing ROMs](docs/installing-roms.md#option-4-in-settings).
 - **[Technical references](docs/references.md):** the Apple manuals and firmware the emulation was checked against, with page numbers, and two places where the emulator differs from the manuals.
 - Emulator options `--display=smooth|classic` and `--controls=fade|always|hidden`. T1 and T2 apps accept both. See [Command-line tools](docs/command-line-tools.md#the-emulator-a2emu).
 
