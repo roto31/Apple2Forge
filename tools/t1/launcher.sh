@@ -28,12 +28,13 @@ end run
 APPLESCRIPT
 }
 
-# Only emulator options the test gate needs are passed through; anything else
-# (including anything LaunchServices adds) is dropped.
+# Only emulator options the test gate needs, --display=classic|smooth and
+# --controls=fade|always|hidden are passed through; anything else (including
+# anything LaunchServices adds) is dropped.
 passthrough_args=()
 for arg in "$@"; do
   case "${arg}" in
-    --frames=*|--snapshot-at=*|--snapshot-out=*|--probe=*|--probe-out=*|--no-sound) passthrough_args+=("${arg}") ;;
+    --frames=*|--snapshot-at=*|--snapshot-out=*|--probe=*|--probe-out=*|--no-sound|--display=*|--controls=*) passthrough_args+=("${arg}") ;;
     *) ;;
   esac
 done

@@ -30,12 +30,13 @@ end run
 APPLESCRIPT
 }
 
-# Only engine options the test gate needs are passed through; anything else
-# (including anything LaunchServices adds) is dropped.
+# Only engine options the test gate needs, --display=classic|smooth and
+# --controls=fade|always|hidden are passed through; anything else (including
+# anything LaunchServices adds) is dropped.
 passthrough_args=()
 for arg in "$@"; do
   case "${arg}" in
-    --frames=*|--headless|--probe=*|--probe-out=*|--no-sound|--hash-frames=*|--key-file=*|--t2-stats=*) passthrough_args+=("${arg}") ;;
+    --frames=*|--headless|--probe=*|--probe-out=*|--no-sound|--hash-frames=*|--key-file=*|--t2-stats=*|--display=*|--controls=*) passthrough_args+=("${arg}") ;;
     *) ;;
   esac
 done

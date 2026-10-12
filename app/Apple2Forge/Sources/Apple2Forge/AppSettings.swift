@@ -48,6 +48,10 @@ final class AppSettings: @unchecked Sendable {
         libraryOverride ?? locationStore.saved ?? LibraryLocation.defaultDirectory
     }
 
+    var emulatorOptions: EmulatorOptions {
+        EmulatorOptions.saved(in: defaults)
+    }
+
     var hasChosenLocation: Bool {
         libraryOverride != nil || locationStore.saved != nil
     }

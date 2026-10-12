@@ -40,6 +40,15 @@ mkdir -p ~/Library/Application\ Support/Apple2Forge/roms
 cp apple2plus.rom apple2e-enhanced.rom apple2e-video.rom ~/Library/Application\ Support/Apple2Forge/roms/
 ```
 
+## Option 3: in Settings
+
+Choose **Apple2Forge ▸ Settings…**, then **Machine**. Each ROM has a **Choose…** button. Apple2Forge checks the file before copying it into the ROM folder:
+
+- **Size:** 12,288 bytes for the Apple ][+ (a 20,480-byte file that also holds Integer BASIC is accepted; its last 12,288 bytes are used), 16,384 bytes for the //e (a 32,768-byte file holding one is accepted), and 4,096 bytes for the //e video ROM.
+- **Machine:** the ID bytes the Apple II Monitor keeps at `$FBB3` (and `$FBC0` on a //e). An original, unenhanced //e or a //c ROM is refused, because Apple2Forge emulates the Apple ][+ and the enhanced //e only.
+
+A file that matches Apple's original chips is shown with their part numbers, for example *Apple 341-0011 to 341-0015 and 341-0020*. A file it replaces is moved to a `backup-YYYYMMDD_HHMMSS` folder in the ROM folder, and **Restore Previous** puts the newest backup back.
+
 ## Check
 
 Start any title from the **Library** menu. If a ROM is missing, Apple2Forge says which file and machine, for example: *The Apple ][+ ROM is not installed (apple2plus.rom)*.

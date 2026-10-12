@@ -25,7 +25,8 @@ final class EmulatorSession {
         let launch: EmulatorLaunch
         do {
             launch = try EmulatorLaunch(title: title, libraryDirectory: library.directory,
-                                        romDirectory: AppSettings.shared.romDirectory)
+                                        romDirectory: AppSettings.shared.romDirectory,
+                                        options: AppSettings.shared.emulatorOptions)
         } catch {
             lastError = error.localizedDescription
             return

@@ -70,6 +70,16 @@ build/a2emu-norom/a2emu --model=iie --rom="$ROMS/apple2e-enhanced.rom" --video-r
 
 With `--control-fd=0`, it reads `mount D PATH` and `eject D` lines from standard input while running. This is how the Disk menu works: see [Signal flow](signal-flow.md#disk-swap).
 
+Options Apple2Forge sets from its Settings window:
+
+| Option | Effect |
+|---|---|
+| `--display=smooth\|classic` | Smooth (the default): sharp scaling and clean hi-res colour. Classic: the original picture with colour fringes. See [Technical references](references.md#display-styles) |
+| `--controls=fade\|always\|hidden` | The floating buttons over the picture: shown when the mouse moves (the default), always shown, or never shown |
+| `--no-sound` | Starts with the sound off; the Sound button turns it on |
+| `--joystick` | Starts with the arrow keys driving the joystick (F7 switches) |
+| `--fast` | Runs at five times the normal speed |
+
 ## Turning a disk you own into a Mac app
 
 ### T1: emulator wrap

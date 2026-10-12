@@ -57,6 +57,9 @@ The game window was probably brought forward through its Dock icon or the app sw
 **"The emulator did not accept the disk change"**
 The game has already quit. Start the title again.
 
+**The picture looks blurry, striped or fringed with colour**
+That's the **Classic** display style. Choose **Smooth** under **Apple2Forge ▸ Settings… ▸ Display**, then start the title again. If the picture still looks wrong, press F3 until the window title shows `HGR:smooth`.
+
 **The game says the disk is write-protected**
 All disks are write-protected: see the [FAQ](faq.md#why-dont-my-scores-or-records-save).
 

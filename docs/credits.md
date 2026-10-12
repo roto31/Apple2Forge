@@ -55,3 +55,5 @@ Full licence texts are in [third-party notices](../THIRD_PARTY_NOTICES.md).
 ## Apple
 
 Apple, Apple II, Apple ][+, Apple //e and Disk II are trademarks of Apple Inc. The Apple II ROMs that Apple2Forge needs are Apple's. You supply your own copy: see [Installing ROMs](installing-roms.md).
+
+The emulator was checked against Apple's *Apple //e Technical Reference Manual*, *Apple //e Technical Notes* and *Monitor ROM Listings*, scanned by the [Apple II Documentation Project](https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/). [Technical references](references.md) lists the pages.

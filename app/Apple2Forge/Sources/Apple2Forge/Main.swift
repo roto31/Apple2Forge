@@ -72,7 +72,8 @@ enum Apple2ForgeMain {
                     return 2
                 }
                 let launch = try EmulatorLaunch(title: title, libraryDirectory: settings.libraryDirectory,
-                                                romDirectory: settings.romDirectory)
+                                                romDirectory: settings.romDirectory,
+                                                options: settings.emulatorOptions)
                 print(([launch.windowTitle] + launch.arguments).joined(separator: "\n"))
                 return 0
             } catch {

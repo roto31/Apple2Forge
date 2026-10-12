@@ -21,6 +21,94 @@ public enum Machine: String, Sendable {
     }
 }
 
+/// How a2emu draws the screen: its --display option.
+public enum DisplayStyle: String, CaseIterable, Sendable {
+    /// Sharp pixels and solid hi-res colour.
+    case smooth
+    /// apple2tc's original softer picture, with the colour fringes of a composite monitor.
+    case classic
+
+    public static let defaultsKey = "displayStyle"
+
+    public var displayName: String {
+        switch self {
+        case .smooth: "Smooth"
+        case .classic: "Classic"
+        }
+    }
+
+    public var argument: String { "--display=\(rawValue)" }
+
+    /// The saved choice; Smooth until one is saved.
+    public static func saved(in defaults: UserDefaults) -> DisplayStyle {
+        defaults.string(forKey: defaultsKey).flatMap(DisplayStyle.init(rawValue:)) ?? .smooth
+    }
+
+    public func save(in defaults: UserDefaults) {
+        defaults.set(rawValue, forKey: Self.defaultsKey)
+    }
+}
+
+/// When a2emu's floating buttons show over the picture: its --controls option.
+public enum ControlsMode: String, CaseIterable, Sendable {
+    /// Shown while the mouse moves over the game, then fade out.
+    case fade
+    case always
+    case hidden
+
+    public static let defaultsKey = "floatingControls"
+
+    public var displayName: String {
+        switch self {
+        case .fade: "Show when the mouse moves"
+        case .always: "Always show"
+        case .hidden: "Hide"
+        }
+    }
+
+    public static func saved(in defaults: UserDefaults) -> ControlsMode {
+        defaults.string(forKey: defaultsKey).flatMap(ControlsMode.init(rawValue:)) ?? .fade
+    }
+}
+
+/// The player's choices that a2emu takes on its command line.
+public struct EmulatorOptions: Sendable, Equatable {
+    public static let soundKey = "soundOn"
+    public static let joystickKey = "joystickAtStart"
+    public static let fastKey = "fastSpeed"
+
+    public var display: DisplayStyle = .smooth
+    public var sound = true
+    public var joystickAtStart = false
+    public var fast = false
+    public var controls: ControlsMode = .fade
+
+    public init(display: DisplayStyle = .smooth, sound: Bool = true, joystickAtStart: Bool = false,
+                fast: Bool = false, controls: ControlsMode = .fade) {
+        self.display = display
+        self.sound = sound
+        self.joystickAtStart = joystickAtStart
+        self.fast = fast
+        self.controls = controls
+    }
+
+    public static func saved(in defaults: UserDefaults) -> EmulatorOptions {
+        EmulatorOptions(display: DisplayStyle.saved(in: defaults),
+                        sound: defaults.object(forKey: soundKey) as? Bool ?? true,
+                        joystickAtStart: defaults.bool(forKey: joystickKey),
+                        fast: defaults.bool(forKey: fastKey),
+                        controls: ControlsMode.saved(in: defaults))
+    }
+
+    public var arguments: [String] {
+        var arguments = [display.argument, "--controls=\(controls.rawValue)"]
+        if !sound { arguments.append("--no-sound") }
+        if joystickAtStart { arguments.append("--joystick") }
+        if fast { arguments.append("--fast") }
+        return arguments
+    }
+}
+
 public enum LaunchError: Error, LocalizedError, Equatable {
     case cannotStart(String)
     case missingRoms(Machine, [String])
@@ -49,7 +137,7 @@ public struct EmulatorLaunch: Sendable, Equatable {
     public let windowTitle: String
 
     public init(title: LibraryTitle, libraryDirectory: URL, romDirectory: URL,
-                fileManager: FileManager = .default) throws {
+                options: EmulatorOptions = EmulatorOptions(), fileManager: FileManager = .default) throws {
         guard let machine = title.requirement.machine else { throw LaunchError.cannotStart(title.title) }
         let missing = machine.romFiles.filter {
             !fileManager.fileExists(atPath: romDirectory.appending(path: $0).path)
@@ -61,7 +149,7 @@ public struct EmulatorLaunch: Sendable, Equatable {
             throw LaunchError.missingDisk(absent)
         }
 
-        var arguments = ["--control-fd=\(Self.controlDescriptor)"]
+        var arguments = ["--control-fd=\(Self.controlDescriptor)"] + options.arguments
         switch machine {
         case .iiPlus:
             arguments.append("--rom=\(romDirectory.appending(path: "apple2plus.rom").path)")

@@ -23,6 +23,8 @@ readonly PATCH_FILES=(
   "${REPO_ROOT}/vendor/patches/a2emu-snapshot-frame.patch"
   "${REPO_ROOT}/vendor/patches/a2emu-disk-order.patch"
   "${REPO_ROOT}/vendor/patches/a2emu-menu-bar.patch"
+  "${REPO_ROOT}/vendor/patches/a2emu-smooth-display.patch"
+  "${REPO_ROOT}/vendor/patches/a2emu-overlay.patch"
 )
 readonly SNAPSHOT_FILES_SUFFIXES=("" ".regs" ".lc" ".disk")
 readonly TEXT_PAGE_TOOL="${REPO_ROOT}/tests/tools/text_page.py"

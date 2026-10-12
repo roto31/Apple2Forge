@@ -26,6 +26,7 @@ This project has two parts: the [native conversion toolkit](native-conversion.md
 
 - [Architecture](architecture.md): the parts of the project and the app, the files they use, and how they fit together.
 - [Signal flow](signal-flow.md): diagrams from a menu click, key press or dropped disk to the emulated Apple II or a built app.
+- [Technical references](references.md): the Apple manuals and ROMs the emulator was checked against, with page numbers.
 
 ## Project
 

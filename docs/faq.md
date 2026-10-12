@@ -38,6 +38,14 @@ About 330 MB for the disk images, plus a few MB for the catalog and logs.
 
 Only during **Download Educational Library…**, which downloads the disk-image list and the images from `mirrors.apple2.org.za` over HTTPS. There are no analytics and no update checks.
 
+## Why do the games look sharper than a real Apple II?
+
+Apple2Forge draws games in the **Smooth** style by default, with sharp pixels and solid colours, because that's what players used to modern screens expect. The colours still follow the rules in Apple's own manual; see [Technical references](references.md#display-styles). If you prefer the softer picture and colour fringes of an Apple II on a colour monitor, choose **Classic** under **Apple2Forge ▸ Settings… ▸ Display**. See [Playing games](playing-games.md#display-style).
+
+## How do I know the emulation is accurate?
+
+The emulated hardware was checked against Apple's *Apple //e Technical Reference Manual*, *Apple //e Technical Notes* and *Monitor ROM Listings*. [Technical references](references.md) lists each document, page and what was compared, including two small differences that haven't been fixed yet.
+
 ## Is there sound?
 
 Yes, the Apple II speaker is emulated.

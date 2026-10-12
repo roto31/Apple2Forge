@@ -103,6 +103,49 @@ private func temporaryFolder() throws -> URL {
         #expect(launch.arguments.contains("--model=iie"))
     }
 
+    @Test func displayStyleIsPassedAndDefaultsToSmooth() throws {
+        let (library, roms) = try fixture(roms: Machine.iiPlus.romFiles)
+        let title = makeTitle(id: "q", title: "Quest", subject: "Math")
+        let standard = try EmulatorLaunch(title: title, libraryDirectory: library, romDirectory: roms)
+        #expect(standard.arguments.contains("--display=smooth"))
+        #expect(standard.arguments.contains("--controls=fade"))
+        #expect(!standard.arguments.contains("--no-sound"))
+        #expect(!standard.arguments.contains("--joystick"))
+        #expect(!standard.arguments.contains("--fast"))
+        let changed = EmulatorOptions(display: .classic, sound: false, joystickAtStart: true, fast: true,
+                                      controls: .hidden)
+        let classic = try EmulatorLaunch(title: title, libraryDirectory: library, romDirectory: roms,
+                                         options: changed)
+        #expect(classic.arguments.contains("--display=classic"))
+        #expect(!classic.arguments.contains("--display=smooth"))
+        for argument in ["--controls=hidden", "--no-sound", "--joystick", "--fast"] {
+            #expect(classic.arguments.contains(argument))
+        }
+    }
+
+    @Test func emulatorOptionsAreReadFromSettings() throws {
+        let suite = "Apple2ForgeTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(EmulatorOptions.saved(in: defaults) == EmulatorOptions())
+        defaults.set(false, forKey: EmulatorOptions.soundKey)
+        defaults.set(true, forKey: EmulatorOptions.fastKey)
+        defaults.set("always", forKey: ControlsMode.defaultsKey)
+        let saved = EmulatorOptions.saved(in: defaults)
+        #expect(saved == EmulatorOptions(sound: false, fast: true, controls: .always))
+    }
+
+    @Test func displayStyleIsRemembered() throws {
+        let suite = "Apple2ForgeTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(DisplayStyle.saved(in: defaults) == .smooth)
+        DisplayStyle.classic.save(in: defaults)
+        #expect(DisplayStyle.saved(in: try #require(UserDefaults(suiteName: suite))) == .classic)
+        defaults.set("bogus", forKey: DisplayStyle.defaultsKey)
+        #expect(DisplayStyle.saved(in: defaults) == .smooth)
+    }
+
     @Test func noBootTitleIsNotStarted() throws {
         let (library, roms) = try fixture(roms: Machine.iiPlus.romFiles)
         let title = makeTitle(id: "q", title: "Data", subject: "Math", requirement: .noBoot)

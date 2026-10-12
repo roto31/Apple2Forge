@@ -71,6 +71,7 @@ Or build the app with `tools/60_build_app.sh` and drop the disk on its **Build**
 | [Command-line tools](docs/command-line-tools.md) | Every script, and the app's command-line modes |
 | [Architecture](docs/architecture.md) | Components, processes, files and folders |
 | [Signal flow](docs/signal-flow.md) | Diagrams of launch, keyboard, disk swap, focus, the Build tab and the pipelines |
+| [Technical references](docs/references.md) | The Apple manuals and ROMs the emulator was checked against, with page numbers |
 | [Troubleshooting](docs/troubleshooting.md) | Error messages and what to do |
 | [FAQ](docs/faq.md) | Common questions |
 | [Credits](docs/credits.md) | The Asimov archive and mirror the games come from, their publishers, and the software this project builds on |

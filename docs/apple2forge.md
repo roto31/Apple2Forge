@@ -93,16 +93,17 @@ Rebuilding moves the previous results into `previous-<time>/`. Intermediate file
 
 ### Settings
 
-**Apple2Forge ▸ Settings…** has these sections:
+**Apple2Forge ▸ Settings…** has five tabs. Changes to the first four apply the next time a title starts.
 
-![The Settings window: project folder and apple2tc commit, the two Apple II+ ROM files, and the builds folder](images/settings.png)
+![The Settings window's Machine tab: the three Apple ROMs with their chip names, the speed and the joystick option](images/settings.png)
 
-| Section | Shows |
+| Tab | Shows |
 |---|---|
-| Project folder | The checkout in use, **Choose…**, **Show Work Folder**, and the pinned apple2tc commit |
-| Apple II ROM | The ROM files the builds use (12,288 bytes for the Apple II+), and **Show ROM Folder** |
-| Builds | The builds folder, and **Show Builds Folder** |
-| Setup check | The same checklist as the Build tab |
+| Picture | **Smooth** (the default: sharp pixels, solid colours) or **Classic** (the softer picture of a colour monitor). See [Playing games](playing-games.md#display-style). |
+| Sound | **Play sound**. Off starts games silent; the sound button over the game turns it on. |
+| Machine | The Apple ][+, Apple //e and //e video ROMs, each with **Choose…** and **Restore Previous** (see [Installing ROMs](installing-roms.md#option-3-in-settings)); **Speed**, Normal or Fast (5×); and **Start in joystick mode**. |
+| Controls | When the [buttons over the game](playing-games.md#buttons-over-the-game) appear: **Show when the mouse moves** (the default), **Always show** or **Hide**. |
+| Build | The project folder (**Choose…**, **Show Work Folder**, the pinned apple2tc commit), the ROM the builds use, the builds folder, and the same setup checklist as the Build tab. |
 
 ## Command line
 

@@ -1,0 +1,363 @@
+--- a/include/apple2tc/a2host_api.h	2026-09-08 12:06:45
++++ b/include/apple2tc/a2host_api.h	2026-10-11 21:45:13
+@@ -279,8 +279,13 @@
+ 
+ /// The `--hgr-mode=` a front end with a display should start in. Parsed here
+ /// (so `a2run` accepts and ignores the flag rather than rejecting it) but only
+-/// meaningful to a front end that renders, i.e. `a2host_gui`.
++/// meaningful to a front end that renders, i.e. `a2host_gui`. Without the flag,
++/// A2_HGR_SMOOTH for the smooth display style and A2_HGR_COLOR for classic.
+ a2_hgr_mode_t a2host_initial_hgr_mode(void);
++/// `--display=smooth` (the default) or `--display=classic`: whether the GUI
++/// scales the picture with sharp pixel edges (smooth) or the original soft
++/// linear stretch (classic).
++bool a2host_display_smooth(void);
+ /// The `--persist` flag: whether the GUI's phosphor-persistence pass should
+ /// start on. Off by default. Console-side, this is parsed and otherwise unused.
+ bool a2host_initial_persist_enabled(void);
+--- a/include/apple2tc/a2io.h	2026-09-08 12:06:45
++++ b/include/apple2tc/a2io.h	2026-10-11 21:45:04
+@@ -65,6 +65,12 @@
+                   ///< that renders as a solid region instead of A2_HGR_MONO's comb.
+                   ///< Like A2_HGR_COLOR140, one pixel per cell: only the first
+                   ///< 140 columns of each row are filled.
++  A2_HGR_SMOOTH, ///< The colour rules of the Apple //e Technical Reference
++                 ///< Manual (1985), p. 24-25 and Table 2-7, at 280 dots: a set
++                 ///< dot with a set neighbour is white, a lone set dot takes
++                 ///< its column's colour, and a clear dot between two dots of
++                 ///< the same colour takes that colour, so fills are solid
++                 ///< instead of striped. Fills all 280 columns.
+ } a2_hgr_mode_t;
+ 
+ /// Render the hires graphics (GR) page pointed by pageStart into a RGB screen.
+--- a/lib/a2host/a2host.c	2026-10-11 20:09:43
++++ b/lib/a2host/a2host.c	2026-10-11 21:45:18
+@@ -137,6 +137,8 @@
+ /// accepts and ignores them instead of failing on an unrecognised flag; only
+ /// `a2host_gui` (a2emu) reads them back, and only it renders anything.
+ static a2_hgr_mode_t initial_hgr_mode_ = A2_HGR_COLOR;
++static bool hgr_mode_given_ = false;
++static bool display_smooth_ = true;
+ static bool initial_persist_enabled_ = false;
+ static float initial_persist_decay_ = 0.75f;
+ /// --paddle= positions, applied once the machine exists. -1 is "not given".
+@@ -273,8 +275,13 @@
+   return engine_stopped_;
+ }
+ a2_hgr_mode_t a2host_initial_hgr_mode(void) {
+-  return initial_hgr_mode_;
++  if (hgr_mode_given_)
++    return initial_hgr_mode_;
++  return display_smooth_ ? A2_HGR_SMOOTH : A2_HGR_COLOR;
+ }
++bool a2host_display_smooth(void) {
++  return display_smooth_;
++}
+ bool a2host_initial_persist_enabled(void) {
+   return initial_persist_enabled_;
+ }
+@@ -1169,9 +1176,13 @@
+   printf(" --snapshot-frame=n Dump machine state after n frames instead\n");
+   printf(" --probe-dump     Print the compiled probe script and exit\n");
+   printf(
+-      " --hgr-mode=m     Windowed only: initial hi-res render mode -- color "
+-      "(default), color140, mono, mono140. Cycled at runtime with F3\n");
++      " --display=s      Windowed only: smooth (default; sharp pixels, solid "
++      "hi-res colour) or classic (the original soft picture)\n");
+   printf(
++      " --hgr-mode=m     Windowed only: initial hi-res render mode -- smooth, "
++      "color, color140, mono, mono140. Default: smooth with --display=smooth, "
++      "color with --display=classic. Cycled at runtime with F3\n");
++  printf(
+       " --persist        Windowed only: start with phosphor persistence on "
+       "(default off). Toggled at runtime with F4\n");
+   printf(
+@@ -1319,9 +1330,24 @@
+       probe_dump_ = true;
+       continue;
+     }
++    if (strncmp(arg, "--display=", 10) == 0) {
++      const char *s = arg + 10;
++      if (strcmp(s, "smooth") == 0)
++        display_smooth_ = true;
++      else if (strcmp(s, "classic") == 0)
++        display_smooth_ = false;
++      else {
++        fprintf(stderr, "--display: expected smooth/classic, got \"%s\"\n", s);
++        exit(2);
++      }
++      continue;
++    }
+     if (strncmp(arg, "--hgr-mode=", 11) == 0) {
+       const char *m = arg + 11;
+-      if (strcmp(m, "color") == 0)
++      hgr_mode_given_ = true;
++      if (strcmp(m, "smooth") == 0)
++        initial_hgr_mode_ = A2_HGR_SMOOTH;
++      else if (strcmp(m, "color") == 0)
+         initial_hgr_mode_ = A2_HGR_COLOR;
+       else if (strcmp(m, "color140") == 0)
+         initial_hgr_mode_ = A2_HGR_COLOR140;
+@@ -1330,7 +1356,7 @@
+       else if (strcmp(m, "mono140") == 0)
+         initial_hgr_mode_ = A2_HGR_MONO140;
+       else {
+-        fprintf(stderr, "--hgr-mode: expected color/color140/mono/mono140, got \"%s\"\n", m);
++        fprintf(stderr, "--hgr-mode: expected smooth/color/color140/mono/mono140, got \"%s\"\n", m);
+         exit(2);
+       }
+       continue;
+--- a/lib/a2host/a2host_gui.c	2026-10-11 20:09:43
++++ b/lib/a2host/a2host_gui.c	2026-10-11 21:45:33
+@@ -40,15 +40,12 @@
+ static a2_sound_t sound_;
+ static a2_screen screen_;
+ 
+-/// Hi-res render mode, cycled at runtime with F3. A2_HGR_COLOR (the per-dot
+-/// artifact approximation the GUI has always drawn) is the default and must
+-/// stay it, so a2emu looks exactly as it always has until a key is pressed.
+-/// A2_HGR_COLOR, and deliberately so. A2_HGR_COLOR140 decodes at the resolution
+-/// the colour information actually has and is easier to read, but a real Apple II
+-/// on a composite monitor showed the fringing and the striping that the per-dot
+-/// approximation reproduces. Those artifacts are the original look rather than a
+-/// rendering defect, and some games are drawn to exploit them, so the emulator
+-/// defaults to the approximation and offers the clean decode on F3.
++/// Hi-res render mode, cycled at runtime with F3. Starts as A2_HGR_SMOOTH
++/// with --display=smooth (the default) and as A2_HGR_COLOR, the per-dot
++/// artifact approximation apple2tc has always drawn, with --display=classic.
++/// A real Apple II on a composite monitor showed the fringing and striping
++/// that A2_HGR_COLOR reproduces, so classic keeps it; smooth is for players
++/// who expect a clean modern picture. Either way --hgr-mode= overrides it.
+ static a2_hgr_mode_t hgrMode_ = A2_HGR_COLOR;
+ 
+ /// Phosphor persistence: default off, toggled with F4, decay adjusted with
+@@ -108,19 +105,33 @@
+ static bool wide_;
+ static a2_rgba8 wideScreen_[WIDE_SCREEN_W_POT * A2_SCREEN_H_POT];
+ 
++/// --display=smooth: the picture is first enlarged by whole pixels to
++/// SHARP_W x SHARP_H, then the GPU's linear filter stretches that to the
++/// window. Only the last fraction of a pixel is blended, so edges stay crisp
++/// at any window size without nearest-neighbour's uneven pixel widths.
++/// SHARP_W x SHARP_H is also the default window's size on a Retina display.
++#define SHARP_SCALE 4
++#define SHARP_W (A2_SCREEN_W * SHARP_SCALE)
++#define SHARP_H (A2_SCREEN_H * SHARP_SCALE)
++static bool smooth_;
++static a2_rgba8 sharpScreen_[SHARP_W * SHARP_H];
++
+ static void init_window(void) {
+   sg_desc desc = {.context = sapp_sgcontext()};
+   sg_setup(&desc);
+ 
+   wide_ = engine_video_wide();
++  smooth_ = a2host_display_smooth();
+   // 560/1024 is the same fraction as 280/512, so the texture coordinates
+   // below hold for both widths.
+   sg_image_desc idesc = {
+-      .width = wide_ ? WIDE_SCREEN_W_POT : A2_SCREEN_W_POT,
+-      .height = A2_SCREEN_H_POT,
++      .width = smooth_ ? SHARP_W : wide_ ? WIDE_SCREEN_W_POT : A2_SCREEN_W_POT,
++      .height = smooth_ ? SHARP_H : A2_SCREEN_H_POT,
+       .usage = SG_USAGE_STREAM,
+       .min_filter = SG_FILTER_LINEAR,
+       .mag_filter = SG_FILTER_LINEAR,
++      .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
++      .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+       .label = "a2_image",
+   };
+   bind_.fs_images[SLOT_tex] = sg_make_image(&idesc);
+@@ -131,9 +142,9 @@
+    * ------+------
+    *    3  |  1
+    */
+-  static const float U = (float)A2_SCREEN_W / A2_SCREEN_W_POT;
+-  static const float V = (float)A2_SCREEN_H / A2_SCREEN_H_POT;
+-  static const float vertices[][4] = {
++  const float U = smooth_ ? 1.0f : (float)A2_SCREEN_W / A2_SCREEN_W_POT;
++  const float V = smooth_ ? 1.0f : (float)A2_SCREEN_H / A2_SCREEN_H_POT;
++  const float vertices[][4] = {
+       {1, 1, U, 0},
+       {1, -1, U, V},
+       {-1, 1, 0, 0},
+@@ -216,6 +227,8 @@
+ /// report_status().
+ static const char *hgr_mode_name(a2_hgr_mode_t mode) {
+   switch (mode) {
++  case A2_HGR_SMOOTH:
++    return "smooth";
+   case A2_HGR_COLOR:
+     return "color";
+   case A2_HGR_COLOR140:
+@@ -351,10 +364,33 @@
+     apply_persistence(decayThisFrame);
+ }
+ 
++/// Enlarge the rendered picture into sharpScreen_: each dot becomes a block
++/// SHARP_SCALE rows tall and SHARP_W / width columns wide (4 for the 280-dot
++/// picture, 2 for the //e's 560-dot one).
++static void scale_to_sharp(void) {
++  const a2_rgba8 *src = wide_ ? wideScreen_ : screen_.data;
++  const unsigned srcStride = wide_ ? WIDE_SCREEN_W_POT : A2_SCREEN_W_POT;
++  const unsigned srcW = wide_ ? A2_SCREEN_W * 2 : A2_SCREEN_W;
++  const unsigned xScale = SHARP_W / srcW;
++  for (unsigned y = 0; y != A2_SCREEN_H; ++y) {
++    const a2_rgba8 *s = src + y * srcStride;
++    a2_rgba8 *row = sharpScreen_ + y * SHARP_SCALE * SHARP_W;
++    for (unsigned x = 0; x != srcW; ++x)
++      for (unsigned k = 0; k != xScale; ++k)
++        row[x * xScale + k] = s[x];
++    for (unsigned r = 1; r != SHARP_SCALE; ++r)
++      memcpy(row + r * SHARP_W, row, SHARP_W * sizeof(a2_rgba8));
++  }
++}
++
+ static void update_screen_image(void) {
+   sg_image_data imgData = {.subimage[0][0] = {.ptr = screen_.data, .size = sizeof(screen_.data)}};
+-  if (wide_)
++  if (smooth_) {
++    scale_to_sharp();
++    imgData.subimage[0][0] = (sg_range){.ptr = sharpScreen_, .size = sizeof(sharpScreen_)};
++  } else if (wide_) {
+     imgData.subimage[0][0] = (sg_range){.ptr = wideScreen_, .size = sizeof(wideScreen_)};
++  }
+   sg_update_image(bind_.fs_images[SLOT_tex], &imgData);
+ }
+ 
+@@ -444,13 +480,16 @@
+ 
+   switch (ev->key_code) {
+   case SAPP_KEYCODE_F3:
+-    // Cycle the hi-res render mode: color -> color140 -> mono -> mono140 ->
+-    // color. Stated explicitly, not as hgrMode_ + 1: a2_hgr_mode_t's
+-    // declaration order (color, mono, color140, mono140) is not this
++    // Cycle the hi-res render mode: smooth -> color -> color140 -> mono ->
++    // mono140 -> smooth. Stated explicitly, not as hgrMode_ + 1: a2_hgr_mode_t's
++    // declaration order (color, mono, color140, mono140, smooth) is not this
+     // presentation order -- color and color140 are the pair this feature
+     // exists to A/B, so they must be adjacent here regardless of how the
+     // enum is declared. Do not derive this from the enum again.
+     switch (hgrMode_) {
++    case A2_HGR_SMOOTH:
++      hgrMode_ = A2_HGR_COLOR;
++      break;
+     case A2_HGR_COLOR:
+       hgrMode_ = A2_HGR_COLOR140;
+       break;
+@@ -462,7 +501,7 @@
+       break;
+     case A2_HGR_MONO140:
+     default:
+-      hgrMode_ = A2_HGR_COLOR;
++      hgrMode_ = A2_HGR_SMOOTH;
+       break;
+     }
+     report_status();
+--- a/lib/a2io/a2io.c	2026-09-08 12:06:45
++++ b/lib/a2io/a2io.c	2026-10-11 21:45:07
+@@ -137,6 +137,38 @@
+     {255, 106, 60},
+ };
+ 
++/// One hi-res row in A2_HGR_SMOOTH: see that mode's comment for the rules.
++/// Dots are taken least significant bit first, and a dot's colour comes from
++/// its own byte's bit 7 and its column parity, as in A2_HGR_COLOR.
++static void render_hgr_smooth_row(const uint8_t *rowStart, a2_rgba8 *d) {
++  enum { DOTS = 280 };
++  bool dots[DOTS];
++  uint8_t hiBit[DOTS];
++  for (unsigned bcol = 0, idx = 0; bcol != 40; ++bcol) {
++    uint8_t memb = rowStart[bcol];
++    uint8_t highBit = (memb >> 6) & 2;
++    for (unsigned i = 0; i != 7; memb >>= 1, ++idx, ++i) {
++      dots[idx] = (memb & 1) != 0;
++      hiBit[idx] = highBit;
++    }
++  }
++
++  const a2_rgba8 black = {0, 0, 0};
++  const a2_rgba8 white = {0xFF, 0xFF, 0xFF};
++#define DOT(i) ((i) >= 0 && (i) < DOTS && dots[(i)])
++  for (int i = 0; i != DOTS; ++i) {
++    if (dots[i]) {
++      d[i] = DOT(i - 1) || DOT(i + 1) ? white : s_hgr_artifact_colors[hiBit[i] | (i & 1)];
++    } else if (
++        DOT(i - 1) && DOT(i + 1) && !DOT(i - 2) && !DOT(i + 2) && hiBit[i - 1] == hiBit[i + 1]) {
++      d[i] = s_hgr_artifact_colors[hiBit[i - 1] | ((i - 1) & 1)];
++    } else {
++      d[i] = black;
++    }
++  }
++#undef DOT
++}
++
+ void apple2_render_hgr_screen(
+     const uint8_t *grPageStart,
+     const uint8_t *textPageStart,
+@@ -220,6 +252,8 @@
+           odd ^= 1;
+         }
+       }
++    } else if (mode == A2_HGR_SMOOTH) {
++      render_hgr_smooth_row(start, d);
+     } else {
+       // A2_HGR_COLOR140 and A2_HGR_MONO140: both decode at the true
+       // colour-clock resolution rather than per-dot.
+--- a/tests/a2io/a2io_test.c	2026-09-08 12:06:45
++++ b/tests/a2io/a2io_test.c	2026-10-11 21:45:44
+@@ -516,7 +516,55 @@
+   a2_io_done(&io3);
+ }
+ 
++enum { VIOLET, GREEN, BLUE, ORANGE, WHITE, BLACK };
++
++static bool is_color(a2_rgba8 c, int which) {
++  static const uint8_t rgb[][3] = {
++      {255, 68, 253}, {20, 245, 60}, {20, 207, 253}, {255, 106, 60}, {255, 255, 255}, {0, 0, 0}};
++  return c.r == rgb[which][0] && c.g == rgb[which][1] && c.b == rgb[which][2];
++}
++
++/// A2_HGR_SMOOTH against the Apple //e Technical Reference Manual's hi-res
++/// colour rules (p. 24-25, Table 2-7). One case per hi-res line, each line
++/// starting at its own 1 KB block of the page.
++static void test_hgr_smooth(void) {
++  static uint8_t page[0x2000];
++  static uint8_t textPage[0x400];
++  static a2_screen screen;
++  page[0x0000] = 0x01;                      // line 0: one dot, even column
++  page[0x0400] = 0x03;                      // line 1: two dots side by side
++  page[0x0800] = 0x55;                      // line 2: even columns 0-6
++  page[0x0C00] = 0xAA;                      // line 3: odd columns 1-5, bit 7 on
++  page[0x1000] = 0x55, page[0x1001] = 0x2A; // line 4: even columns 0-12 across two bytes
++  page[0x1400] = 0x40, page[0x1401] = 0x82; // line 5: columns 6 and 8, different bit 7
++  apple2_render_hgr_screen_mode(page, textPage, &screen, 0, false, A2_HGR_SMOOTH);
++  const a2_rgba8 *line[6];
++  for (unsigned y = 0; y != 6; ++y)
++    line[y] = screen.data + y * A2_SCREEN_W_POT;
++
++  check(is_color(line[0][0], VIOLET) && is_color(line[0][1], BLACK), "smooth: a lone even dot is violet");
++  check(
++      is_color(line[1][0], WHITE) && is_color(line[1][1], WHITE) && is_color(line[1][2], BLACK),
++      "smooth: two adjacent dots are both white");
++  bool solid = true;
++  for (unsigned x = 0; x != 7; ++x)
++    solid = solid && is_color(line[2][x], VIOLET);
++  check(solid && is_color(line[2][7], BLACK), "smooth: a violet fill is solid, not striped");
++  solid = is_color(line[3][0], BLACK) && is_color(line[3][6], BLACK);
++  for (unsigned x = 1; x != 6; ++x)
++    solid = solid && is_color(line[3][x], ORANGE);
++  check(solid, "smooth: odd dots with bit 7 on fill orange");
++  solid = true;
++  for (unsigned x = 0; x != 13; ++x)
++    solid = solid && is_color(line[4][x], VIOLET);
++  check(solid, "smooth: a fill stays solid across a byte boundary");
++  check(
++      is_color(line[5][6], VIOLET) && is_color(line[5][7], BLACK) && is_color(line[5][8], BLUE),
++      "smooth: a gap between two different colours stays black");
++}
++
+ int main(void) {
++  test_hgr_smooth();
+   test_speaker();
+   test_kbdstrb();
+   test_keyboard_latch();

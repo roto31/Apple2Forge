@@ -1,0 +1,744 @@
+--- a/include/apple2tc/a2host_api.h	2026-10-11 21:52:45
++++ b/include/apple2tc/a2host_api.h	2026-10-11 21:54:22
+@@ -282,6 +282,10 @@
+ /// meaningful to a front end that renders, i.e. `a2host_gui`. Without the flag,
+ /// A2_HGR_SMOOTH for the smooth display style and A2_HGR_COLOR for classic.
+ a2_hgr_mode_t a2host_initial_hgr_mode(void);
++/// `--controls=fade` (the default), `always` or `hidden`: when the GUI shows
++/// its floating buttons over the picture. 0, 1 and 2 respectively, matching
++/// a2_overlay_mode_t.
++int a2host_controls_mode(void);
+ /// `--display=smooth` (the default) or `--display=classic`: whether the GUI
+ /// scales the picture with sharp pixel edges (smooth) or the original soft
+ /// linear stretch (classic).
+--- a/lib/a2host/CMakeLists.txt	2026-09-08 12:06:45
++++ b/lib/a2host/CMakeLists.txt	2026-10-11 21:54:22
+@@ -19,7 +19,12 @@
+ # sokol_main(), which lives here -- so nothing in the executable's own objects
+ # references this translation unit, and a static archive would never be pulled
+ # in. Objects are always linked.
+-add_library(a2host_gui OBJECT a2host_gui.c)
++if (APPLE)
++  add_library(a2host_gui OBJECT a2host_gui.c a2host_overlay.m a2host_overlay.h)
++  set_source_files_properties(a2host_overlay.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
++else ()
++  add_library(a2host_gui OBJECT a2host_gui.c a2host_overlay_stub.c a2host_overlay.h)
++endif ()
+ target_link_libraries(a2host_gui PUBLIC a2host sokol a2io)
+ 
+ # The console front end. An OBJECT library for the same reason as a2host_gui:
+--- a/lib/a2host/a2host.c	2026-10-11 21:52:45
++++ b/lib/a2host/a2host.c	2026-10-11 21:54:25
+@@ -139,6 +139,7 @@
+ static a2_hgr_mode_t initial_hgr_mode_ = A2_HGR_COLOR;
+ static bool hgr_mode_given_ = false;
+ static bool display_smooth_ = true;
++static int controls_mode_ = 0;
+ static bool initial_persist_enabled_ = false;
+ static float initial_persist_decay_ = 0.75f;
+ /// --paddle= positions, applied once the machine exists. -1 is "not given".
+@@ -282,6 +283,9 @@
+ bool a2host_display_smooth(void) {
+   return display_smooth_;
+ }
++int a2host_controls_mode(void) {
++  return controls_mode_;
++}
+ bool a2host_initial_persist_enabled(void) {
+   return initial_persist_enabled_;
+ }
+@@ -1179,6 +1183,9 @@
+       " --display=s      Windowed only: smooth (default; sharp pixels, solid "
+       "hi-res colour) or classic (the original soft picture)\n");
+   printf(
++      " --controls=c     Windowed only, macOS: floating buttons over the picture -- "
++      "fade (default; shown when the mouse moves), always, hidden\n");
++  printf(
+       " --hgr-mode=m     Windowed only: initial hi-res render mode -- smooth, "
+       "color, color140, mono, mono140. Default: smooth with --display=smooth, "
+       "color with --display=classic. Cycled at runtime with F3\n");
+@@ -1338,6 +1345,20 @@
+         display_smooth_ = false;
+       else {
+         fprintf(stderr, "--display: expected smooth/classic, got \"%s\"\n", s);
++        exit(2);
++      }
++      continue;
++    }
++    if (strncmp(arg, "--controls=", 11) == 0) {
++      const char *c = arg + 11;
++      if (strcmp(c, "fade") == 0)
++        controls_mode_ = 0;
++      else if (strcmp(c, "always") == 0)
++        controls_mode_ = 1;
++      else if (strcmp(c, "hidden") == 0)
++        controls_mode_ = 2;
++      else {
++        fprintf(stderr, "--controls: expected fade/always/hidden, got \"%s\"\n", c);
+         exit(2);
+       }
+       continue;
+--- a/lib/a2host/a2host_gui.c	2026-10-11 21:52:45
++++ b/lib/a2host/a2host_gui.c	2026-10-11 21:55:00
+@@ -28,9 +28,11 @@
+ 
+ #include "apple2tc/sokol/blit.h"
+ 
++#include "a2host_overlay.h"
+ #include "probe_internal.h" // probe_stop_requested(), consulted in frame_cb below
+ 
+ #include <ctype.h>
++#include <stdatomic.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -78,16 +80,29 @@
+ 
+ static a2host_gui_event_hook event_hook_ = NULL;
+ 
++/// Whether saudio is set up. Starts as a2host_sound_enabled(); the Sound
++/// button sets it up later for a game started with --no-sound.
++static bool audioReady_ = false;
++/// The Sound button's mute. The stream callback keeps draining the queue
++/// while muted, so unmuting does not play stale samples.
++static atomic_bool muted_ = false;
++
+ void a2host_gui_set_event_hook(a2host_gui_event_hook hook) {
+   event_hook_ = hook;
+ }
+ 
+ /// Submit the audio produced during the frame that just ran.
+ static void frame_done(void) {
+-  if (a2host_sound_enabled())
++  if (audioReady_)
+     a2_sound_submit(&sound_, A2_CLOCK_FREQ, saudio_sample_rate(), get_cycles());
+ }
+ 
++/// Only engine6502 is designed to be rebooted (see a2host_reboot()); the
++/// decompiled games keep state of their own that a reboot would not reset.
++__attribute__((weak)) bool engine_supports_reboot(void) {
++  return false;
++}
++
+ /// An engine that emulates an Apple //e draws its own 560-dot-wide picture
+ /// (80 columns, double lo-res and double hi-res need it) and wants //e
+ /// keyboard rules; these weak defaults are the Apple II+ answer.
+@@ -180,11 +195,25 @@
+ /// Callback from saudio to generate new sound samples.
+ static void stream_userdata_cb(float *buffer, int num_frames, int num_channels, void *user_data) {
+   a2_sound_cb((a2_sound_t *)user_data, buffer, num_frames, num_channels);
++  if (atomic_load_explicit(&muted_, memory_order_relaxed))
++    memset(buffer, 0, sizeof(float) * (size_t)num_frames * (size_t)num_channels);
+ }
+ 
++static void setup_audio(void) {
++  saudio_desc audioDesc = {
++      .num_channels = 1,
++      .stream_userdata_cb = stream_userdata_cb,
++      .user_data = &sound_,
++  };
++  saudio_setup(&audioDesc);
++  audioReady_ = true;
++}
++
+ /// Forward-declared: init_cb() needs it (see the call below) but it is
+ /// defined further down, next to the other status-display helpers.
+ static void report_status(void);
++static void overlay_action(a2_overlay_action_t action);
++static void update_overlay(void);
+ 
+ static void init_cb(void) {
+   init_window();
+@@ -205,20 +234,18 @@
+   a2host_init_emulation();
+   a2_io_set_spkr_cb(a2host_io(), &sound_, speaker_cb);
+ 
+-  if (a2host_sound_enabled()) {
+-    saudio_desc audioDesc = {
+-        .num_channels = 1,
+-        .stream_userdata_cb = stream_userdata_cb,
+-        .user_data = &sound_,
+-    };
+-    saudio_setup(&audioDesc);
+-  }
++  if (a2host_sound_enabled())
++    setup_audio();
++
++  a2_overlay_create(sapp_macos_get_window(), (a2_overlay_mode_t)a2host_controls_mode(), engine_supports_reboot(),
++                    overlay_action);
++  update_overlay();
+ }
+ 
+ static void cleanup_cb(void) {
+   a2host_shutdown();
+   sg_shutdown();
+-  if (a2host_sound_enabled())
++  if (audioReady_)
+     saudio_shutdown();
+   a2_sound_done(&sound_);
+ }
+@@ -474,37 +501,101 @@
+ ///
+ /// Returns whether \p ev was one of these keys, so event_cb() knows to stop
+ /// processing it.
++/// Cycle the hi-res render mode: smooth -> color -> color140 -> mono ->
++/// mono140 -> smooth. Stated explicitly, not as hgrMode_ + 1: a2_hgr_mode_t's
++/// declaration order (color, mono, color140, mono140, smooth) is not this
++/// presentation order -- color and color140 are the pair this feature
++/// exists to A/B, so they must be adjacent here regardless of how the
++/// enum is declared. Do not derive this from the enum again.
++static void cycle_hgr_mode(void) {
++  switch (hgrMode_) {
++  case A2_HGR_SMOOTH:
++    hgrMode_ = A2_HGR_COLOR;
++    break;
++  case A2_HGR_COLOR:
++    hgrMode_ = A2_HGR_COLOR140;
++    break;
++  case A2_HGR_COLOR140:
++    hgrMode_ = A2_HGR_MONO;
++    break;
++  case A2_HGR_MONO:
++    hgrMode_ = A2_HGR_MONO140;
++    break;
++  case A2_HGR_MONO140:
++  default:
++    hgrMode_ = A2_HGR_SMOOTH;
++    break;
++  }
++  report_status();
++}
++
++/// F7 and the Joystick button.
++static void toggle_joystick(void) {
++  joyMode_ = !joyMode_;
++  // Leaving the mode with a key held would strand the stick at a rail.
++  if (!joyMode_)
++    a2host_joy_release_all();
++  report_status();
++  update_overlay();
++}
++
++static void update_overlay(void) {
++  a2_overlay_set_state(joyMode_, audioReady_ && !atomic_load(&muted_));
++}
++
++static void toggle_sound(void) {
++  if (!audioReady_) {
++    setup_audio();
++    atomic_store(&muted_, false);
++  } else {
++    atomic_store(&muted_, !atomic_load(&muted_));
++  }
++  update_overlay();
++}
++
++/// The Restart button: boot again from the disks the game started with.
++static void restart_machine(void) {
++  a2host_reboot();
++  // a2host_reboot() -> a2_io_init() clears the speaker callback.
++  a2_io_set_spkr_cb(a2host_io(), &sound_, speaker_cb);
++  // The cycle counter restarted at zero; left alone, a2_sound_submit() would
++  // take that for a 32-bit wraparound and generate 2^32 cycles of samples.
++  sound_.last_cycle = 0;
++  sound_.cycle_base = 0;
++  sound_.last_generated_cycle = 0;
++  memset(&persistBuf_, 0, sizeof(persistBuf_));
++}
++
++static void overlay_action(a2_overlay_action_t action) {
++  switch (action) {
++  case A2_OVERLAY_RESTART:
++    // Same rule as F7: a cycle-stamped replay must not be perturbed.
++    if (!a2host_key_replay_active() && engine_supports_reboot())
++      restart_machine();
++    break;
++  case A2_OVERLAY_JOYSTICK:
++    if (!a2host_key_replay_active())
++      toggle_joystick();
++    break;
++  case A2_OVERLAY_PICTURE:
++    cycle_hgr_mode();
++    break;
++  case A2_OVERLAY_SOUND:
++    toggle_sound();
++    break;
++  case A2_OVERLAY_FULLSCREEN:
++    sapp_toggle_fullscreen();
++    break;
++  }
++}
++
+ static bool handle_display_key(const sapp_event *ev) {
+   if (ev->type != SAPP_EVENTTYPE_KEY_DOWN)
+     return false;
+ 
+   switch (ev->key_code) {
+   case SAPP_KEYCODE_F3:
+-    // Cycle the hi-res render mode: smooth -> color -> color140 -> mono ->
+-    // mono140 -> smooth. Stated explicitly, not as hgrMode_ + 1: a2_hgr_mode_t's
+-    // declaration order (color, mono, color140, mono140, smooth) is not this
+-    // presentation order -- color and color140 are the pair this feature
+-    // exists to A/B, so they must be adjacent here regardless of how the
+-    // enum is declared. Do not derive this from the enum again.
+-    switch (hgrMode_) {
+-    case A2_HGR_SMOOTH:
+-      hgrMode_ = A2_HGR_COLOR;
+-      break;
+-    case A2_HGR_COLOR:
+-      hgrMode_ = A2_HGR_COLOR140;
+-      break;
+-    case A2_HGR_COLOR140:
+-      hgrMode_ = A2_HGR_MONO;
+-      break;
+-    case A2_HGR_MONO:
+-      hgrMode_ = A2_HGR_MONO140;
+-      break;
+-    case A2_HGR_MONO140:
+-    default:
+-      hgrMode_ = A2_HGR_SMOOTH;
+-      break;
+-    }
+-    report_status();
++    cycle_hgr_mode();
+     return true;
+   case SAPP_KEYCODE_F4:
+     // Toggle phosphor persistence. Reset the buffer on the way to "on" so
+@@ -599,11 +690,7 @@
+   }
+ 
+   if (ev->type == SAPP_EVENTTYPE_KEY_DOWN && ev->key_code == SAPP_KEYCODE_F7) {
+-    joyMode_ = !joyMode_;
+-    // Leaving the mode with a key held would strand the stick at a rail.
+-    if (!joyMode_)
+-      a2host_joy_release_all();
+-    report_status();
++    toggle_joystick();
+     return true;
+   }
+ 
+@@ -644,6 +731,9 @@
+ }
+ 
+ static void event_cb(const sapp_event *ev) {
++  if (ev->type == SAPP_EVENTTYPE_MOUSE_MOVE)
++    a2_overlay_wake();
++
+   // The front end gets first refusal, so it can add keys of its own.
+   if (event_hook_ && event_hook_(ev))
+     return;
+--- a/lib/a2host/a2host_overlay.h	1969-12-31 18:00:00
++++ b/lib/a2host/a2host_overlay.h	2026-10-11 21:54:18
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) Tzvetan Mikov.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++/// \file
++/// The floating buttons over the game window (macOS only; a no-op elsewhere).
++/// They never reach the emulated machine directly: each button calls back into
++/// a2host_gui.c, which does exactly what the matching key does.
++
++#pragma once
++
++#include <stdbool.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef enum {
++  A2_OVERLAY_FADE, ///< Shown when the mouse moves over the game, then fade out.
++  A2_OVERLAY_ALWAYS,
++  A2_OVERLAY_HIDDEN,
++} a2_overlay_mode_t;
++
++typedef enum {
++  A2_OVERLAY_RESTART,
++  A2_OVERLAY_JOYSTICK,
++  A2_OVERLAY_PICTURE,
++  A2_OVERLAY_SOUND,
++  A2_OVERLAY_FULLSCREEN,
++} a2_overlay_action_t;
++
++typedef void (*a2_overlay_action_fn)(a2_overlay_action_t action);
++
++/// Attach the buttons to \p nsWindow (an NSWindow *). \p canRestart hides the
++/// restart button for engines that cannot reboot.
++void a2_overlay_create(const void *nsWindow, a2_overlay_mode_t mode, bool canRestart, a2_overlay_action_fn fn);
++/// Reflect the joystick and sound state in the buttons.
++void a2_overlay_set_state(bool joystickOn, bool soundOn);
++/// Show the buttons, as when the mouse moves over the game.
++void a2_overlay_wake(void);
++
++#ifdef __cplusplus
++}
++#endif
+--- a/lib/a2host/a2host_overlay.m	1969-12-31 18:00:00
++++ b/lib/a2host/a2host_overlay.m	2026-10-11 21:54:18
+@@ -0,0 +1,320 @@
++/*
++ * Copyright (c) Tzvetan Mikov.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++/// \file
++/// The floating buttons over the game window.
++///
++/// They live in a borderless child panel, not in the game window's own view:
++/// the picture is an OpenGL view, which draws over any sibling view. The panel
++/// never becomes key and never activates this process, so the keyboard stays
++/// with the game and the launching app keeps the menu bar (see
++/// a2emu-menu-bar.patch). For the same reason restarting asks for a second
++/// click rather than showing an alert, which would activate this process.
++
++#import <Cocoa/Cocoa.h>
++
++#include "a2host_overlay.h"
++
++static const NSTimeInterval kIdleSeconds = 2.5;
++static const NSTimeInterval kRestartArmSeconds = 3.0;
++static const CGFloat kButtonWidth = 38;
++static const CGFloat kButtonHeight = 30;
++static const CGFloat kPillHeight = 44;
++static const CGFloat kPillPadding = 10;
++static const CGFloat kBottomGap = 16;
++static const CGFloat kCornerRadius = 22;
++
++/// Works on the first click, although its window is never key, and never
++/// takes the keyboard from the game.
++@interface A2OverlayButton : NSButton
++@end
++
++@implementation A2OverlayButton
++- (BOOL)acceptsFirstMouse:(NSEvent *)event {
++  return YES;
++}
++- (BOOL)acceptsFirstResponder {
++  return NO;
++}
++@end
++
++@interface A2OverlayController : NSObject
++@end
++
++@implementation A2OverlayController {
++  NSWindow *_parent;
++  NSPanel *_panel;
++  NSStackView *_stack;
++  a2_overlay_mode_t _mode;
++  a2_overlay_action_fn _fn;
++  NSTimer *_hideTimer;
++  NSTimer *_disarmTimer;
++  BOOL _hovering;
++  BOOL _restartArmed;
++  BOOL _joystickOn;
++  BOOL _soundOn;
++  A2OverlayButton *_restart;
++  A2OverlayButton *_joystick;
++  A2OverlayButton *_sound;
++  A2OverlayButton *_fullscreen;
++}
++
++static NSImage *rounded_mask(CGFloat radius) {
++  CGFloat side = radius * 2 + 1;
++  NSImage *image = [NSImage imageWithSize:NSMakeSize(side, side)
++                                  flipped:NO
++                           drawingHandler:^BOOL(NSRect rect) {
++                             [[NSColor blackColor] set];
++                             [[NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius] fill];
++                             return YES;
++                           }];
++  image.capInsets = NSEdgeInsetsMake(radius, radius, radius, radius);
++  image.resizingMode = NSImageResizingModeStretch;
++  return image;
++}
++
++- (instancetype)initWithWindow:(NSWindow *)parent
++                          mode:(a2_overlay_mode_t)mode
++                    canRestart:(BOOL)canRestart
++                            fn:(a2_overlay_action_fn)fn {
++  if (!(self = [super init]))
++    return nil;
++  _parent = parent;
++  _mode = mode;
++  _fn = fn;
++  _soundOn = YES;
++
++  _panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 100, kPillHeight)
++                                      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
++                                        backing:NSBackingStoreBuffered
++                                          defer:NO];
++  _panel.opaque = NO;
++  _panel.backgroundColor = [NSColor clearColor];
++  _panel.hasShadow = YES;
++  _panel.hidesOnDeactivate = NO;
++  _panel.becomesKeyOnlyIfNeeded = YES;
++  _panel.releasedWhenClosed = NO;
++  _panel.excludedFromWindowsMenu = YES;
++  _panel.collectionBehavior = NSWindowCollectionBehaviorFullScreenAuxiliary;
++
++  NSVisualEffectView *pill = [[NSVisualEffectView alloc] initWithFrame:_panel.contentView.bounds];
++  pill.material = NSVisualEffectMaterialHUDWindow;
++  pill.blendingMode = NSVisualEffectBlendingModeBehindWindow;
++  pill.state = NSVisualEffectStateActive;
++  pill.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
++  pill.maskImage = rounded_mask(kCornerRadius);
++  pill.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  _panel.contentView = pill;
++
++  _restart = [self buttonWithSymbol:@"arrow.clockwise" label:@"Restart" tag:A2_OVERLAY_RESTART];
++  _joystick = [self buttonWithSymbol:@"gamecontroller" label:@"Joystick mode (F7)" tag:A2_OVERLAY_JOYSTICK];
++  A2OverlayButton *picture = [self buttonWithSymbol:@"paintpalette"
++                                              label:@"Next colour mode (F3)"
++                                                tag:A2_OVERLAY_PICTURE];
++  _sound = [self buttonWithSymbol:@"speaker.wave.2.fill" label:@"Sound on or off" tag:A2_OVERLAY_SOUND];
++  _fullscreen = [self buttonWithSymbol:@"arrow.up.left.and.arrow.down.right"
++                                 label:@"Full screen"
++                                   tag:A2_OVERLAY_FULLSCREEN];
++  NSMutableArray<NSView *> *buttons = [NSMutableArray arrayWithObjects:_joystick, picture, _sound, _fullscreen, nil];
++  if (canRestart)
++    [buttons insertObject:_restart atIndex:0];
++  _stack = [NSStackView stackViewWithViews:buttons];
++  _stack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
++  _stack.spacing = 4;
++  [pill addSubview:_stack];
++
++  NSTrackingAreaOptions options = NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways |
++      NSTrackingInVisibleRect;
++  [parent.contentView addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
++                                                                    options:options
++                                                                      owner:self
++                                                                   userInfo:@{@"area" : @"game"}]];
++  [pill addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
++                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways |
++                                                         NSTrackingInVisibleRect
++                                                       owner:self
++                                                    userInfo:@{@"area" : @"pill"}]];
++
++  NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
++  for (NSNotificationName name in @[
++         NSWindowDidResizeNotification, NSWindowDidEnterFullScreenNotification,
++         NSWindowDidExitFullScreenNotification
++       ])
++    [center addObserver:self selector:@selector(parentChanged:) name:name object:parent];
++
++  [self layoutPill];
++  [parent addChildWindow:_panel ordered:NSWindowAbove];
++  [self wake];
++  return self;
++}
++
++- (A2OverlayButton *)buttonWithSymbol:(NSString *)symbol label:(NSString *)label tag:(a2_overlay_action_t)tag {
++  A2OverlayButton *button = [[A2OverlayButton alloc] initWithFrame:NSMakeRect(0, 0, kButtonWidth, kButtonHeight)];
++  button.bordered = NO;
++  button.imagePosition = NSImageOnly;
++  button.contentTintColor = [NSColor whiteColor];
++  button.toolTip = label;
++  button.tag = tag;
++  button.target = self;
++  button.action = @selector(pressed:);
++  [self setSymbol:symbol label:label on:button];
++  [button.widthAnchor constraintEqualToConstant:kButtonWidth].active = YES;
++  [button.heightAnchor constraintEqualToConstant:kButtonHeight].active = YES;
++  return button;
++}
++
++- (void)setSymbol:(NSString *)symbol label:(NSString *)label on:(NSButton *)button {
++  NSImageSymbolConfiguration *config = [NSImageSymbolConfiguration configurationWithPointSize:15
++                                                                                       weight:NSFontWeightSemibold];
++  NSImage *image = [[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:label]
++      imageWithSymbolConfiguration:config];
++  if (image) {
++    button.image = image;
++    button.imagePosition = NSImageOnly;
++  } else {
++    button.title = [label substringToIndex:1];
++    button.imagePosition = NSNoImage;
++  }
++  button.accessibilityLabel = label;
++}
++
++- (void)layoutPill {
++  NSSize fit = _stack.fittingSize;
++  CGFloat width = fit.width + 2 * kPillPadding;
++  NSRect content = [_parent contentRectForFrameRect:_parent.frame];
++  NSRect frame = NSMakeRect(round(NSMidX(content) - width / 2), NSMinY(content) + kBottomGap, width, kPillHeight);
++  [_panel setFrame:frame display:YES];
++  _stack.frame = NSMakeRect(kPillPadding, (kPillHeight - fit.height) / 2, fit.width, fit.height);
++}
++
++- (void)parentChanged:(NSNotification *)note {
++  BOOL full = (_parent.styleMask & NSWindowStyleMaskFullScreen) != 0;
++  [self setSymbol:full ? @"arrow.down.right.and.arrow.up.left" : @"arrow.up.left.and.arrow.down.right"
++            label:full ? @"Leave full screen" : @"Full screen"
++               on:_fullscreen];
++  [self layoutPill];
++}
++
++// ---- showing and fading ----
++
++- (void)wake {
++  if (_mode == A2_OVERLAY_HIDDEN)
++    return;
++  [_hideTimer invalidate];
++  _hideTimer = nil;
++  _panel.ignoresMouseEvents = NO;
++  [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
++    context.duration = 0.15;
++    self->_panel.animator.alphaValue = 1;
++  }];
++  if (_mode == A2_OVERLAY_FADE && !_hovering && !_restartArmed)
++    _hideTimer = [NSTimer scheduledTimerWithTimeInterval:kIdleSeconds
++                                                  target:self
++                                                selector:@selector(fade:)
++                                                userInfo:nil
++                                                 repeats:NO];
++}
++
++- (void)fade:(NSTimer *)timer {
++  _hideTimer = nil;
++  [NSAnimationContext
++      runAnimationGroup:^(NSAnimationContext *context) {
++        context.duration = 0.5;
++        self->_panel.animator.alphaValue = 0;
++      }
++      completionHandler:^{
++        if (self->_panel.alphaValue == 0)
++          self->_panel.ignoresMouseEvents = YES;
++      }];
++}
++
++- (void)mouseMoved:(NSEvent *)event {
++  [self wake];
++}
++
++- (void)mouseEntered:(NSEvent *)event {
++  if ([event.trackingArea.userInfo[@"area"] isEqual:@"pill"])
++    _hovering = YES;
++  [self wake];
++}
++
++- (void)mouseExited:(NSEvent *)event {
++  if ([event.trackingArea.userInfo[@"area"] isEqual:@"pill"]) {
++    _hovering = NO;
++    [self wake];
++  }
++}
++
++// ---- buttons ----
++
++- (void)pressed:(NSButton *)sender {
++  a2_overlay_action_t action = (a2_overlay_action_t)sender.tag;
++  if (action == A2_OVERLAY_RESTART && !_restartArmed) {
++    [self armRestart];
++    return;
++  }
++  if (action == A2_OVERLAY_RESTART)
++    [self disarmRestart:nil];
++  _fn(action);
++  [self wake];
++}
++
++- (void)armRestart {
++  _restartArmed = YES;
++  _restart.contentTintColor = [NSColor systemRedColor];
++  [self setSymbol:@"exclamationmark.arrow.circlepath" label:@"Click again to restart" on:_restart];
++  _restart.toolTip = @"Click again to restart. Anything not saved is lost.";
++  _disarmTimer = [NSTimer scheduledTimerWithTimeInterval:kRestartArmSeconds
++                                                  target:self
++                                                selector:@selector(disarmRestart:)
++                                                userInfo:nil
++                                                 repeats:NO];
++  [self wake];
++}
++
++- (void)disarmRestart:(NSTimer *)timer {
++  [_disarmTimer invalidate];
++  _disarmTimer = nil;
++  _restartArmed = NO;
++  _restart.contentTintColor = [NSColor whiteColor];
++  [self setSymbol:@"arrow.clockwise" label:@"Restart" on:_restart];
++  _restart.toolTip = @"Restart";
++  [self wake];
++}
++
++- (void)setJoystick:(BOOL)joystickOn sound:(BOOL)soundOn {
++  _joystickOn = joystickOn;
++  _soundOn = soundOn;
++  _joystick.contentTintColor = joystickOn ? [NSColor controlAccentColor] : [NSColor whiteColor];
++  [self setSymbol:joystickOn ? @"gamecontroller.fill" : @"gamecontroller"
++            label:joystickOn ? @"Joystick mode is on (F7)" : @"Joystick mode (F7)"
++               on:_joystick];
++  [self setSymbol:soundOn ? @"speaker.wave.2.fill" : @"speaker.slash.fill"
++            label:soundOn ? @"Turn sound off" : @"Turn sound on"
++               on:_sound];
++}
++
++@end
++
++static A2OverlayController *s_overlay;
++
++void a2_overlay_create(const void *nsWindow, a2_overlay_mode_t mode, bool canRestart, a2_overlay_action_fn fn) {
++  if (s_overlay || !nsWindow || mode == A2_OVERLAY_HIDDEN)
++    return;
++  s_overlay = [[A2OverlayController alloc] initWithWindow:(__bridge NSWindow *)nsWindow
++                                                     mode:mode
++                                               canRestart:canRestart
++                                                       fn:fn];
++}
++
++void a2_overlay_set_state(bool joystickOn, bool soundOn) {
++  [s_overlay setJoystick:joystickOn sound:soundOn];
++}
++
++void a2_overlay_wake(void) {
++  [s_overlay wake];
++}
+--- a/lib/a2host/a2host_overlay_stub.c	1969-12-31 18:00:00
++++ b/lib/a2host/a2host_overlay_stub.c	2026-10-11 21:54:19
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) Tzvetan Mikov.
++ *
++ * This source code is licensed under the MIT license found in the
++ * LICENSE file in the root directory of this source tree.
++ */
++
++/// \file
++/// The floating buttons exist only on macOS; see a2host_overlay.m.
++
++#include "a2host_overlay.h"
++
++void a2_overlay_create(const void *nsWindow, a2_overlay_mode_t mode, bool canRestart, a2_overlay_action_fn fn) {
++  (void)nsWindow;
++  (void)mode;
++  (void)canRestart;
++  (void)fn;
++}
++
++void a2_overlay_set_state(bool joystickOn, bool soundOn) {
++  (void)joystickOn;
++  (void)soundOn;
++}
++
++void a2_overlay_wake(void) {}
+--- a/lib/engine6502/engine6502.cpp	2026-10-11 21:52:45
++++ b/lib/engine6502/engine6502.cpp	2026-10-11 21:55:00
+@@ -1397,6 +1397,11 @@
+ 
+ } // namespace
+ 
++/// The GUI's Restart button calls a2host_reboot(), which this engine supports.
++extern "C" bool engine_supports_reboot(void) {
++  return true;
++}
++
+ extern "C" bool engine_video_wide(void) {
+   return s_model == "iie";
+ }

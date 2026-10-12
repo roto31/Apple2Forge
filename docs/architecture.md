@@ -167,6 +167,8 @@ On macOS the menu bar belongs to the active app. A normal window from a second p
 
 Both have a Disk II controller in slot 6 with two drives.
 
+The emulated hardware was checked against Apple's own manuals. [Technical references](references.md) lists each document and page.
+
 ## Source layout
 
 | Path | Contents |

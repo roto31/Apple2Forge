@@ -42,6 +42,8 @@ Exports the pinned source into `vendor/apple2tc-norom-src/` (regenerated every r
 | `a2emu-snapshot-frame.patch` | `--snapshot-frame=N` for scripted captures |
 | `a2emu-disk-order.patch` | Detects ProDOS-order `.dsk` images |
 | `a2emu-menu-bar.patch` | Makes the game window a non-activating panel, so Apple2Forge keeps the menu bar |
+| `a2emu-smooth-display.patch` | `--display=smooth` (the default: sharp scaling, and hi-res colour per the Apple //e Technical Reference Manual; see [Technical references](references.md#display-styles)) or `--display=classic` (the original picture) |
+| `a2emu-overlay.patch` | The floating buttons over the game (Restart, Joystick, Picture, Sound, Full screen) and `--controls=fade\|always\|hidden` |
 
 It then builds `a2emu` and checks the result:
 - no ROM bytes are inside it

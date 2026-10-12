@@ -9,6 +9,29 @@ All notable changes to this project (the native conversion toolkit and the bundl
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+A cleaner picture by default, buttons over the game, and a new Settings window that can install your ROMs.
+
+### Added
+- **Smooth picture, now the default.** Sharp, evenly scaled pixels and solid hi-res colours, worked out from the rules in Apple's *Apple //e Technical Reference Manual*. **Classic** keeps the earlier picture, with the colour fringes of a monitor. F3 now cycles smooth, colour, colour (140-pixel), monochrome and monochrome (140-pixel). See [Playing games](docs/playing-games.md#display-style).
+- **Buttons over the game:** Restart, Joystick, Picture, Sound and Full screen. They appear when the mouse moves over the game and fade a few seconds later. They never take your typing away from the game. Restart needs two clicks and isn't shown in T2 apps. See [Playing games](docs/playing-games.md#buttons-over-the-game).
+- **Settings tabs:** Picture, Sound, Machine, Controls and Build. Sound off, Fast (5×) speed and Start in joystick mode apply when a title starts. See [Apple2Forge](docs/apple2forge.md#settings).
+- **ROM picker** on the Machine tab. A chosen file is checked by size and by the Monitor's ID bytes before it's copied in. Files matching Apple's original chips are named by part number. The file it replaces is kept in a backup folder, and **Restore Previous** puts it back. An original (unenhanced) //e or a //c ROM is refused. See [Installing ROMs](docs/installing-roms.md#option-3-in-settings).
+- **[Technical references](docs/references.md):** the Apple manuals and firmware the emulation was checked against, with page numbers, and two places where the emulator differs from the manuals.
+- Emulator options `--display=smooth|classic` and `--controls=fade|always|hidden`. T1 and T2 apps accept both. See [Command-line tools](docs/command-line-tools.md#the-emulator-a2emu).
+
+### Changed
+- Settings moved from one long page into tabs. The project folder, the ROM builds use, and the builds folder are on the **Build** tab.
+
+### Docs
+- New FAQ entries ("Why do the games look sharper than a real Apple II?", "How do I know the emulation is accurate?") and a troubleshooting entry for a blurry, striped or fringed picture.
+- [Building from source](docs/building-from-source.md) lists the two new emulator patches.
+- The Settings screenshot now shows the Machine tab.
+
+### Known limitations
+- Restart boots the disks the title started with. After a **Disk** menu swap, the Disk menu still shows the swapped disk; choose it again to put it back in. See [Playing games](docs/playing-games.md#buttons-over-the-game).
+
 ## [0.2.0] - 2026-10-11
 
 The repository now holds the whole project: the [native conversion toolkit](docs/native-conversion.md), and [Apple2Forge](docs/apple2forge.md), documented as the app bundled with it. The public history was squashed into one commit; the v0.1.0 tag still points at the first release.
