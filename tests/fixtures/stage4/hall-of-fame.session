@@ -1,0 +1,19 @@
+# Main menu > Hall of Fame: open one list, then "See all Hall of Fame lists".
+N 60000
+RETURN
+DOWN
+RETURN            # Hall of Fame menu
+RETURN            # 1. Multiples
+SPACE
+DOWN
+DOWN
+DOWN
+DOWN
+DOWN
+RETURN            # 6. See all lists
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE

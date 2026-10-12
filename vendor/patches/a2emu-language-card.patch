@@ -1,0 +1,156 @@
+Apple2Forge: 16K Language Card (slot 0) for a2emu, so the emulated Apple II+
+has 64K. Soft switches $C080-$C08F, two $D000 banks, $E000-$FFFF RAM.
+Apply after a2emu-require-rom.patch. Pinned: e095c14ae7fd51fb638e14d5f9667ba6b19f945b.
+
+diff --color -ru a/include/apple2tc/emu6502.h b/include/apple2tc/emu6502.h
+--- a/include/apple2tc/emu6502.h
++++ b/include/apple2tc/emu6502.h
+@@ -166,9 +166,14 @@
+       ioPoke(addr, value);
+     else if (addr < romStart_)
+       ram_[addr] = value;
++    else
++      highWrite(addr, value);
+   }
+ 
+ protected:
++  /// A CPU write at or above romStart_. ROM ignores it; a subclass that banks
++  /// RAM over the ROM (an Apple II Language Card) overrides this.
++  virtual void highWrite(uint16_t addr, uint8_t value) {}
+   /// Perform a read in the IO range.
+   virtual uint8_t ioPeek(uint16_t addr);
+   /// Perform a write in the IO range.
+diff --color -ru a/lib/engine6502/engine6502.cpp b/lib/engine6502/engine6502.cpp
+--- a/lib/engine6502/engine6502.cpp
++++ b/lib/engine6502/engine6502.cpp
+@@ -46,17 +46,122 @@
+ /// An Emu6502 whose IO goes to the host rather than to an `a2_iostate_t` of its
+ /// own. There is exactly one IO state in the process and the host owns it,
+ /// because the host is what renders it, replays keys into it and hashes it.
++///
++/// It also carries a 16K Language Card in slot 0, which is what turns a 48K
++/// Apple II+ into the 64K machine many later titles require. The CPU reads
++/// $D000-$FFFF straight out of the 64K RAM array, so that array always holds
++/// whichever source is selected for reading (ROM or card RAM); switching
++/// copies the outgoing view back to its bank and the incoming one in.
+ class HostedEmu : public Emu6502 {
+ public:
+   HostedEmu() : Emu6502(0xC000, 0xCFFF) {}
+ 
++  /// Call after loadROM(): captures the ROM image and puts the card in its
++  /// power-on state (read ROM, write-protected, $D000 bank 2, RAM filled with
++  /// $FF like main RAM). loadROM() maps the image to end at $FFFF, so one
++  /// smaller than 12K does not cover $D000 and leaves the card off.
++  void powerOnLanguageCard(size_t romSize) {
++    lcEnabled_ = romSize >= kLcSize;
++    readRam_ = false;
++    writeEnabled_ = false;
++    bank2_ = true;
++    prewrite_ = false;
++    if (!lcEnabled_)
++      return;
++    memcpy(rom_, getMainRAM() + kLcBase, kLcSize);
++    memset(bank1_, 0xFF, sizeof(bank1_));
++    memset(bank2Ram_, 0xFF, sizeof(bank2Ram_));
++    memset(high_, 0xFF, sizeof(high_));
++  }
++
+ protected:
+   uint8_t ioPeek(uint16_t addr) override {
++    if (lcEnabled_ && (addr & 0xFFF0) == kLcSwitchBase) {
++      languageCardSwitch(addr, true);
++      return 0;
++    }
+     return io_peek(addr);
+   }
+   void ioPoke(uint16_t addr, uint8_t value) override {
++    if (lcEnabled_ && (addr & 0xFFF0) == kLcSwitchBase) {
++      languageCardSwitch(addr, false);
++      return;
++    }
+     io_poke(addr, value);
+   }
++  void highWrite(uint16_t addr, uint8_t value) override {
++    if (!lcEnabled_ || addr < kLcBase || !writeEnabled_)
++      return;
++    if (readRam_) {
++      // The card RAM is what is mapped in, so the RAM array is its live copy.
++      getMainRAMWritable()[addr] = value;
++    } else if (addr < kLcHighBase) {
++      selectedBank()[addr - kLcBase] = value;
++    } else {
++      high_[addr - kLcHighBase] = value;
++    }
++  }
++
++private:
++  static constexpr uint16_t kLcSwitchBase = 0xC080;
++  static constexpr uint16_t kLcBase = 0xD000;
++  static constexpr uint16_t kLcHighBase = 0xE000;
++  static constexpr unsigned kLcBankSize = 0x1000;
++  static constexpr unsigned kLcHighSize = 0x2000;
++  static constexpr unsigned kLcSize = kLcBankSize + kLcHighSize;
++
++  uint8_t *selectedBank() {
++    return bank2_ ? bank2Ram_ : bank1_;
++  }
++
++  /// $C080-$C08F: bit 3 picks the $D000 bank (0 = bank 2), the low two bits
++  /// pick the mode (0 read RAM, 1 read ROM + write, 2 read ROM, 3 read RAM +
++  /// write). Writing is enabled only by two consecutive reads of an odd
++  /// switch; an even switch disables it, and a write access breaks the pair.
++  void languageCardSwitch(uint16_t addr, bool isRead) {
++    if (addr & 0x01) {
++      if (isRead) {
++        if (prewrite_)
++          writeEnabled_ = true;
++        prewrite_ = true;
++      } else {
++        prewrite_ = false;
++      }
++    } else {
++      writeEnabled_ = false;
++      prewrite_ = false;
++    }
++    unsigned mode = addr & 0x03;
++    mapReadSource(mode == 0 || mode == 3, (addr & 0x08) == 0);
++  }
++
++  void mapReadSource(bool readRam, bool bank2) {
++    if (readRam == readRam_ && bank2 == bank2_)
++      return;
++    uint8_t *ram = getMainRAMWritable();
++    if (readRam_) {
++      memcpy(selectedBank(), ram + kLcBase, kLcBankSize);
++      memcpy(high_, ram + kLcHighBase, kLcHighSize);
++    }
++    readRam_ = readRam;
++    bank2_ = bank2;
++    if (readRam_) {
++      memcpy(ram + kLcBase, selectedBank(), kLcBankSize);
++      memcpy(ram + kLcHighBase, high_, kLcHighSize);
++    } else {
++      memcpy(ram + kLcBase, rom_, kLcSize);
++    }
++  }
++
++  bool lcEnabled_ = false;
++  bool readRam_ = false;
++  bool writeEnabled_ = false;
++  bool bank2_ = true;
++  bool prewrite_ = false;
++  uint8_t rom_[kLcSize];
++  uint8_t bank1_[kLcBankSize];
++  uint8_t bank2Ram_[kLcBankSize];
++  uint8_t high_[kLcHighSize];
+ };
+ 
+ HostedEmu s_emu;
+@@ -268,6 +373,7 @@
+   }
+   auto rom = readFileOrDie(s_romPath);
+   s_emu.loadROM(rom.data(), rom.size());
++  s_emu.powerOnLanguageCard(rom.size());
+ 
+   if (!s_disk1Path.empty())
+     mountDisk(s_disk1Path, 0);

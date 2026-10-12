@@ -1,0 +1,42 @@
+PERSONAL-USE BUILD — DO NOT DISTRIBUTE
+
+This app was generated on your Mac from a disk image you supplied. The game on
+that disk is copyrighted by its publisher. This app contains a translation of
+that game's code to C as well as the disk image itself. Sharing this app may
+infringe that copyright. Keep it for your own use.
+
+What is inside
+- Tier: T2-hybrid (recompiled, with an interpreter fallback).
+  The game's 6502 code that recorded play sessions reached was translated to
+  C by apple2tc and compiled to native arm64 code. Each translated
+  block checks that the bytes in memory still match what was translated; if
+  not, or if the game reaches code no session recorded, a built-in 6502
+  interpreter runs it instead, so the game stays fully playable. The build
+  report gives the share of instructions that ran as native code
+  (work/<disk>/t2build/equivalence/equivalence.md).
+  This is not a rewritten game (T3): graphics, sound, keyboard and the disk
+  drive are still emulated Apple II hardware.
+- Start image: the machine's memory when the title screen first appears,
+  taken from a run of the emulator with your disk. Every byte that came from
+  the Apple ROM is left out of it.
+- Engine runtime: apple2tc (https://github.com/tmikov/apple2tc, MIT License,
+  (c) Tzvetan Mikov) for the hardware, with Apple2Forge patches. sokol
+  (zlib/libpng License, (c) Andre Weissflog) provides the window, graphics and
+  sound; nlohmann/json (MIT License, (c) Niels Lohmann) is linked in. Full
+  license texts are in Contents/Resources/licenses/.
+- Your disk image, copied unchanged.
+
+What is NOT inside
+- No Apple ROM and no Disk II boot PROM. A few Monitor routines the game
+  calls (character output, printing blanks and returns, inverse text,
+  paddle reads, clearing the screen) are written from scratch in C.
+  If your own Apple II+ ROM is installed at
+    ~/Library/Application Support/Apple2Forge/roms/apple2plus.rom
+  the app also loads it, so ROM code outside those routines runs from your
+  copy. The app does not need it to play.
+
+Known difference from the original
+- Choosing Quit in the game restarts at the title screen instead of
+  rebooting the disk (the boot loader screens are skipped).
+
+Logs: ~/Library/Logs/Apple2Forge/

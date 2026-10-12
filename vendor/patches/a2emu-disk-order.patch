@@ -1,0 +1,83 @@
+diff -ruN a/lib/a2io/disk2.c b/lib/a2io/disk2.c
+--- a/lib/a2io/disk2.c	2026-10-11 18:58:50
++++ b/lib/a2io/disk2.c	2026-10-11 18:58:50
+@@ -92,10 +92,55 @@
+   buf[(*pos)++] = DISK2_EPILOGUE_3; // EB
+ }
+ 
++enum { PRODOS_BLOCK_SIZE = 512, PRODOS_VOLUME_KEY_BLOCK = 2, DOS_SECTOR_OF_KEY_BLOCK = 0xB };
++
++/// A ProDOS volume directory key block: no previous block, a volume header
++/// (storage type $F) with a name, and the standard entry length and count.
++static bool is_volume_key_block(const uint8_t *block) {
++  return block[0] == 0 && block[1] == 0 && (block[4] >> 4) == 0xF && (block[4] & 0xF) != 0 &&
++         block[0x23] == 0x27 && block[0x24] == 0x0D;
++}
++
++enum { DOS_CATALOG_TRACK = 17, MIN_STANDARD_CATALOG_LINKS = 8 };
++
++/// Where DOS logical sector `logical` is stored within a track of a
++/// ProDOS-order image: sectors 0 and 15 match, the rest run backwards.
++static int prodos_order_index(int logical) {
++  return (logical == 0 || logical == 15) ? logical : 15 - logical;
++}
++
++/// DOS 3.3 INIT links the catalog as track 17, sectors 15 -> 14 -> ... -> 1.
++/// Counts how many of those 14 links are in place when the image is read in
++/// the given order; sector 0 (the VTOC) sits at the same offset in both, so
++/// only the catalog sectors can tell the orders apart.
++static int standard_catalog_links(const uint8_t *dsk_data, bool prodos_order) {
++  int links = 0;
++  for (int sector = DISK2_SECTORS_PER_TRACK - 1; sector > 1; --sector) {
++    int stored = prodos_order ? prodos_order_index(sector) : sector;
++    const uint8_t *catalog =
++        dsk_data + (DOS_CATALOG_TRACK * DISK2_SECTORS_PER_TRACK + stored) * DISK2_BYTES_PER_SECTOR;
++    if (catalog[1] == DOS_CATALOG_TRACK && catalog[2] == sector - 1)
++      ++links;
++  }
++  return links;
++}
++
++/// Images saved in ProDOS block order (.po data under a .dsk name). A ProDOS
++/// volume has its key block at block 2's file offset rather than at track 0,
++/// DOS sector $B; a DOS 3.3 disk's catalog only links up in that order.
++static bool is_prodos_order(const uint8_t *dsk_data) {
++  if (is_volume_key_block(dsk_data + PRODOS_VOLUME_KEY_BLOCK * PRODOS_BLOCK_SIZE) &&
++      !is_volume_key_block(dsk_data + DOS_SECTOR_OF_KEY_BLOCK * DISK2_BYTES_PER_SECTOR))
++    return true;
++  int prodos_links = standard_catalog_links(dsk_data, true);
++  return prodos_links >= MIN_STANDARD_CATALOG_LINKS &&
++         prodos_links > standard_catalog_links(dsk_data, false);
++}
++
+ /// Nibblize a single track from DSK format into the nibble stream.
+ /// Writes address fields, data fields, gaps, and sync bytes for all 16 sectors.
+ static void nibblize_track(
+-    int track, const uint8_t *dsk_data, uint8_t *nib_out, int *nib_len) {
++    int track, const uint8_t *dsk_data, bool prodos_order, uint8_t *nib_out, int *nib_len) {
+   int pos = 0;
+   uint8_t volume = 254;
+ 
+@@ -105,8 +150,9 @@
+ 
+   for (int phys_sector = 0; phys_sector < DISK2_SECTORS_PER_TRACK; phys_sector++) {
+     int logical = dos33_phys_to_logical[phys_sector];
++    int stored = prodos_order ? prodos_order_index(logical) : logical;
+     const uint8_t *sector_data =
+-        &dsk_data[(track * DISK2_SECTORS_PER_TRACK + logical) * DISK2_BYTES_PER_SECTOR];
++        &dsk_data[(track * DISK2_SECTORS_PER_TRACK + stored) * DISK2_BYTES_PER_SECTOR];
+ 
+     write_address_field(nib_out, &pos, volume, (uint8_t)track, (uint8_t)phys_sector);
+ 
+@@ -137,9 +183,10 @@
+   if (!drv->nib_data)
+     return false;
+ 
++  bool prodos_order = is_prodos_order(dsk_data);
+   for (int t = 0; t < DISK2_TRACKS_PER_DISK; t++) {
+     int nib_len = 0;
+-    nibblize_track(t, dsk_data, drv->nib_data + t * DISK2_NIB_TRACK_SIZE, &nib_len);
++    nibblize_track(t, dsk_data, prodos_order, drv->nib_data + t * DISK2_NIB_TRACK_SIZE, &nib_len);
+     // Pad the rest of the track with sync bytes.
+     while (nib_len < DISK2_NIB_TRACK_SIZE)
+       drv->nib_data[t * DISK2_NIB_TRACK_SIZE + nib_len++] = 0xFF;

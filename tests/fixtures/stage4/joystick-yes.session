@@ -1,0 +1,13 @@
+# Joystick: Yes, with no joystick connected (paddles read as centred). Best effort.
+Y 60000
+RETURN
+RETURN            # Number Munchers
+RETURN            # Multiples
+RETURN            # instructions? No
+RETURN            # Get ready
+SPACE 30
+SPACE 30
+ESC 30
+ESC 30
+SPACE 3000
+RETURN 3000

@@ -1,0 +1,9 @@
+{
+  "profiles": [
+    {
+      "name": "Number Munchers v1.3 (MECC A-170, 4am crack)",
+      "disk_sha256": "600d11521b947b41b87bdd783501e59a7302b5f0e7f00b01a7c1c6ddd94083ed",
+      "coverage_sessions": ["tests/fixtures/stage4", "tests/fixtures/stage5"]
+    }
+  ]
+}
