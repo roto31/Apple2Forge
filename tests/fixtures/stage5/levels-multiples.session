@@ -1,0 +1,15 @@
+# Multiples: clear 12 levels with the game's own answer table (tools/lib/board_solver.py),
+# then end the game and enter a Hall of Fame name.
+N 60000           # joystick? highlight No
+RETURN
+RETURN            # main menu: Number Munchers
+mark mode
+RETURN            # game menu: Multiples
+RETURN            # instructions? No
+RETURN            # Get ready
+poll $895F $D179  # keyboard sites found in play; counted from the first run
+clear-levels 12
+A 3000            # name entry
+B 3000
+RETURN 3000       # name entered
+expect-load-after mode

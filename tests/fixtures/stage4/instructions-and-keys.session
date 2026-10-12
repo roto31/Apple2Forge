@@ -1,0 +1,28 @@
+# Multiples with instructions, then the special keys during play, then Escape twice.
+N 60000
+RETURN
+RETURN            # Number Munchers
+RETURN            # Multiples
+Y                 # instructions? highlight Yes
+RETURN
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE
+RETURN            # Get ready
+QUESTION 30       # time out
+QUESTION 300      # resume
+CTRL-S 30         # sound off
+CTRL-S 30         # sound on
+I 30
+J 30
+K 30
+M 30
+A 30
+Z 30
+SPACE 30
+ESC 30            # Escape twice ends the game
+ESC 30
+SPACE 3000
+RETURN 3000

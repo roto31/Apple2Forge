@@ -1,0 +1,14 @@
+# Multiples: play until every life is lost, then enter a Hall of Fame name.
+N 60000           # joystick? highlight No
+RETURN
+RETURN            # main menu: Number Munchers
+mark mode
+RETURN            # game menu: Multiples
+RETURN            # instructions? No
+RETURN            # Get ready
+snake             # munch every square: wrong answers and Troggles end the game
+SPACE 60000       # Congratulations: continue
+A 3000
+B 3000
+RETURN 3000       # name entered
+expect-load-after mode

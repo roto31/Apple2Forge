@@ -1,0 +1,23 @@
+PERSONAL-USE BUILD — DO NOT DISTRIBUTE
+
+This app was generated on your Mac from a disk image you supplied. The game on
+that disk is copyrighted by its publisher. Sharing this app, or the disk image
+inside it, may infringe that copyright. Keep it for your own use.
+
+What is inside
+- Tier: T1 Wrap. The original Apple II program runs unchanged inside an
+  emulator; it is not a recompiled or rewritten game.
+- Emulator: a2emu from apple2tc (https://github.com/tmikov/apple2tc, MIT
+  License, (c) Tzvetan Mikov), built with Apple2Forge patches that remove the
+  built-in ROM and add a 16K Language Card. sokol (zlib/libpng License,
+  (c) Andre Weissflog) provides the window, graphics and sound; nlohmann/json
+  (MIT License, (c) Niels Lohmann) is linked in. Full license texts are in
+  Contents/Resources/licenses/.
+- Your disk image, copied unchanged.
+
+What is NOT inside
+- No Apple ROM. At launch the app reads your own Apple II+ ROM from
+  ~/Library/Application Support/Apple2Forge/roms/apple2plus.rom
+  and shows an alert if it is missing.
+
+Logs: ~/Library/Logs/Apple2Forge/

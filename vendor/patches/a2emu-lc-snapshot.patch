@@ -1,0 +1,343 @@
+Apple2Forge: snapshots also save the Language Card (<snapshot>.lc) and the
+Disk II controller/drive state (<snapshot>.disk); --restore=<snapshot> resumes
+a saved machine instead of booting.
+Apply after a2emu-language-card.patch. Pinned: e095c14ae7fd51fb638e14d5f9667ba6b19f945b.
+
+diff --color -ru a/include/apple2tc/emu6502.h b/include/apple2tc/emu6502.h
+--- a/include/apple2tc/emu6502.h
++++ b/include/apple2tc/emu6502.h
+@@ -112,6 +112,11 @@
+   [[nodiscard]] unsigned getCycles() const {
+     return cycles_;
+   }
++  /// Set the cycle counter, for resuming a saved machine at the cycle it was
++  /// saved, so cycle-stamped key files still line up.
++  void setCycles(unsigned cycles) {
++    cycles_ = cycles;
++  }
+ 
+   /// Return a read-only pointer to a 64KB buffer of RAM. Not all of that RAM is
+   /// actually usable.
+diff --color -ru a/lib/a2host/probe.c b/lib/a2host/probe.c
+--- a/lib/a2host/probe.c
++++ b/lib/a2host/probe.c
+@@ -104,6 +104,13 @@
+   return s_snap_armed && !s_snap_fired;
+ }
+ 
++/// Machine state an engine keeps outside the 64K array (e.g. Language Card
++/// banks) goes next to the RAM image. Engines with none simply do not define
++/// this; the interpreter engine overrides it.
++__attribute__((weak)) void engine_snapshot_extra(const char *ram_path) {
++  (void)ram_path;
++}
++
+ static void probe_take_snapshot(uint16_t pc) {
+   s_snap_fired = true;
+ 
+@@ -151,6 +158,8 @@
+   // to acknowledge, which is the number a rebased entry point has to recreate.
+   fprintf(g, "kbd_last_key %02X\nkbd_queued %u\n", io->latch, a2_io_keys_count(io));
+   fclose(g);
++
++  engine_snapshot_extra(s_snap_ram_path);
+ }
+ 
+ static char *read_file(const char *path) {
+diff --color -ru a/lib/engine6502/engine6502.cpp b/lib/engine6502/engine6502.cpp
+--- a/lib/engine6502/engine6502.cpp
++++ b/lib/engine6502/engine6502.cpp
+@@ -37,6 +37,8 @@
+ #include <cstring>
+ #include <fstream>
+ #include <iostream>
++#include <iterator>
++#include <map>
+ #include <optional>
+ #include <string>
+ #include <vector>
+@@ -74,6 +76,57 @@
+     memset(high_, 0xFF, sizeof(high_));
+   }
+ 
++  bool languageCardEnabled() const {
++    return lcEnabled_;
++  }
++
++  /// The card as a snapshot sidecar: an 8-byte header ("A2LC", version, switch
++  /// flags, two reserved bytes), then bank 1, bank 2 and the $E000-$FFFF RAM.
++  /// While card RAM is mapped for reading, the RAM array holds the live copy
++  /// of the selected bank and high RAM, so those come from there.
++  std::vector<uint8_t> saveLanguageCard() const {
++    std::vector<uint8_t> out(kLcStateBytes, 0);
++    memcpy(out.data(), kLcMagic, sizeof(kLcMagic));
++    out[4] = kLcStateVersion;
++    out[5] = switchFlags();
++    uint8_t *bank1 = out.data() + kLcHeaderBytes;
++    uint8_t *bank2 = bank1 + kLcBankSize;
++    uint8_t *high = bank2 + kLcBankSize;
++    memcpy(bank1, bank1_, kLcBankSize);
++    memcpy(bank2, bank2Ram_, kLcBankSize);
++    memcpy(high, high_, kLcHighSize);
++    if (readRam_) {
++      memcpy(bank2_ ? bank2 : bank1, getMainRAM() + kLcBase, kLcBankSize);
++      memcpy(high, getMainRAM() + kLcHighBase, kLcHighSize);
++    }
++    return out;
++  }
++
++  /// Inverse of saveLanguageCard(). Call after the 64K array is restored: it
++  /// re-maps $D000-$FFFF to whatever the saved switches select for reading.
++  bool restoreLanguageCard(const std::vector<uint8_t> &in) {
++    if (!lcEnabled_ || in.size() != kLcStateBytes ||
++        memcmp(in.data(), kLcMagic, sizeof(kLcMagic)) != 0 || in[4] != kLcStateVersion)
++      return false;
++    uint8_t flags = in[5];
++    readRam_ = (flags & kFlagReadRam) != 0;
++    bank2_ = (flags & kFlagBank2) != 0;
++    writeEnabled_ = (flags & kFlagWriteEnabled) != 0;
++    prewrite_ = (flags & kFlagPrewrite) != 0;
++    const uint8_t *bank1 = in.data() + kLcHeaderBytes;
++    memcpy(bank1_, bank1, kLcBankSize);
++    memcpy(bank2Ram_, bank1 + kLcBankSize, kLcBankSize);
++    memcpy(high_, bank1 + 2 * kLcBankSize, kLcHighSize);
++    uint8_t *ram = getMainRAMWritable();
++    if (readRam_) {
++      memcpy(ram + kLcBase, selectedBank(), kLcBankSize);
++      memcpy(ram + kLcHighBase, high_, kLcHighSize);
++    } else {
++      memcpy(ram + kLcBase, rom_, kLcSize);
++    }
++    return true;
++  }
++
+ protected:
+   uint8_t ioPeek(uint16_t addr) override {
+     if (lcEnabled_ && (addr & 0xFFF0) == kLcSwitchBase) {
+@@ -109,7 +162,20 @@
+   static constexpr unsigned kLcBankSize = 0x1000;
+   static constexpr unsigned kLcHighSize = 0x2000;
+   static constexpr unsigned kLcSize = kLcBankSize + kLcHighSize;
++  static constexpr char kLcMagic[4] = {'A', '2', 'L', 'C'};
++  static constexpr uint8_t kLcStateVersion = 1;
++  static constexpr unsigned kLcHeaderBytes = 8;
++  static constexpr unsigned kLcStateBytes = kLcHeaderBytes + 2 * kLcBankSize + kLcHighSize;
++  static constexpr uint8_t kFlagReadRam = 0x01;
++  static constexpr uint8_t kFlagBank2 = 0x02;
++  static constexpr uint8_t kFlagWriteEnabled = 0x04;
++  static constexpr uint8_t kFlagPrewrite = 0x08;
+ 
++  uint8_t switchFlags() const {
++    return (readRam_ ? kFlagReadRam : 0) | (bank2_ ? kFlagBank2 : 0) |
++        (writeEnabled_ ? kFlagWriteEnabled : 0) | (prewrite_ ? kFlagPrewrite : 0);
++  }
++
+   uint8_t *selectedBank() {
+     return bank2_ ? bank2Ram_ : bank1_;
+   }
+@@ -172,6 +238,7 @@
+ std::string s_runPath;
+ std::string s_disk1Path;
+ std::string s_disk2Path;
++std::string s_restorePath;
+ std::string s_outPath;
+ unsigned s_limit = 0;
+ bool s_collect = false;
+@@ -237,6 +304,148 @@
+   fprintf(stderr, "Mounted disk%d: %s\n", drive + 1, path.c_str());
+ }
+ 
++[[noreturn]] void restoreFail(const std::string &path, const char *why) {
++  fprintf(stderr, "ERROR: cannot restore %s: %s\n", path.c_str(), why);
++  exit(2);
++}
++
++/// The Disk II controller and drive state as "name value" lines, so a restore
++/// resumes with the head, motor and rotation where they were. Which image is
++/// in each drive is not recorded: mount the same one on restore.
++void saveDisk2State(const std::string &path) {
++  const a2_disk2_t &d = a2host_io()->disk2;
++  FILE *f = fopen(path.c_str(), "wt");
++  if (!f) {
++    perror(path.c_str());
++    exit(2);
++  }
++  fprintf(
++      f,
++      "data_register %u\nq6 %d\nq7 %d\nmotor_on %d\nmotor_off_cycle %llu\n"
++      "last_nibble_cycle %u\nselected_drive %d\nphases %u\nphase_position %d\n",
++      d.data_register,
++      (int)d.q6,
++      (int)d.q7,
++      (int)d.motor_on,
++      (unsigned long long)d.motor_off_cycle,
++      d.last_nibble_cycle,
++      d.selected_drive,
++      d.phases,
++      d.phase_position);
++  for (int i = 0; i != 2; ++i) {
++    const a2_disk2_drive_t &drv = d.drive[i];
++    fprintf(
++        f,
++        "drive%d_mounted %d\ndrive%d_position %u\ndrive%d_skip %d\ndrive%d_current_track %d\n",
++        i, (int)drv.mounted, i, drv.position, i, (int)drv.skip, i, drv.current_track);
++  }
++  fclose(f);
++}
++
++void restoreDisk2State(const std::string &path) {
++  std::ifstream in(path);
++  if (!in)
++    restoreFail(path, "cannot open");
++  std::map<std::string, unsigned long long> v;
++  std::string name;
++  unsigned long long value;
++  while (in >> name >> value)
++    v[name] = value;
++  const char *const kNeeded[] = {
++      "data_register", "q6", "q7", "motor_on", "motor_off_cycle", "last_nibble_cycle",
++      "selected_drive", "phases", "phase_position", "drive0_mounted", "drive0_position",
++      "drive0_skip", "drive0_current_track", "drive1_mounted", "drive1_position",
++      "drive1_skip", "drive1_current_track"};
++  for (const char *needed : kNeeded)
++    if (!v.count(needed))
++      restoreFail(path, (std::string("missing ") + needed).c_str());
++
++  a2_disk2_t &d = a2host_io()->disk2;
++  for (int i = 0; i != 2; ++i) {
++    std::string prefix = "drive" + std::to_string(i) + "_";
++    a2_disk2_drive_t &drv = d.drive[i];
++    if (v[prefix + "mounted"] != (drv.mounted ? 1u : 0u))
++      restoreFail(path, ("drive " + std::to_string(i + 1) +
++                         (drv.mounted ? " is mounted now but was empty when saved"
++                                      : " was mounted when saved; give the same --disk")).c_str());
++    drv.position = (uint32_t)v[prefix + "position"];
++    drv.skip = v[prefix + "skip"] != 0;
++    drv.current_track = (int)v[prefix + "current_track"];
++  }
++  d.data_register = (uint8_t)v["data_register"];
++  d.q6 = v["q6"] != 0;
++  d.q7 = v["q7"] != 0;
++  d.motor_on = v["motor_on"] != 0;
++  d.motor_off_cycle = v["motor_off_cycle"];
++  d.last_nibble_cycle = (unsigned)v["last_nibble_cycle"];
++  d.selected_drive = (int)v["selected_drive"];
++  d.phases = (uint8_t)v["phases"];
++  d.phase_position = (int)v["phase_position"];
++}
++
++/// Resume a machine saved by --snapshot-out=: the 64K image and its .regs,
++/// .lc and .disk files. Not restored: paddle timers, and staged type-ahead
++/// (refused).
++void restoreSnapshot(const std::string &path) {
++  auto ram = readFileOrDie(path);
++  if (ram.size() != 0x10000)
++    restoreFail(path, "RAM image is not 65536 bytes");
++  auto lc = readFileOrDie(path + ".lc");
++
++  std::ifstream regsFile(path + ".regs");
++  if (!regsFile)
++    restoreFail(path + ".regs", "cannot open");
++  const char *const kNeeded[] = {
++      "pc", "a", "x", "y", "sp", "status", "cycles", "vid_control", "kbd_last_key", "kbd_queued"};
++  unsigned long values[std::size(kNeeded)];
++  bool seen[std::size(kNeeded)] = {};
++  std::string name, value;
++  while (regsFile >> name >> value) {
++    for (size_t i = 0; i != std::size(kNeeded); ++i) {
++      if (name == kNeeded[i]) {
++        bool decimal = name == "cycles" || name == "kbd_queued";
++        values[i] = strtoul(value.c_str(), nullptr, decimal ? 10 : 16);
++        seen[i] = true;
++      }
++    }
++  }
++  for (size_t i = 0; i != std::size(kNeeded); ++i)
++    if (!seen[i])
++      restoreFail(path + ".regs", (std::string("missing ") + kNeeded[i]).c_str());
++  enum { PC, A, X, Y, SP, STATUS, CYCLES, VID_CONTROL, KBD_LAST_KEY, KBD_QUEUED };
++  if (values[KBD_QUEUED] > 1)
++    restoreFail(path, "more than one key was pending; type-ahead is not restorable");
++
++  memcpy(s_emu.getMainRAMWritable(), ram.data(), ram.size());
++  if (!s_emu.restoreLanguageCard(lc))
++    restoreFail(path + ".lc", "not a Language Card state file for this machine");
++  restoreDisk2State(path + ".disk");
++  s_emu.setRegs(Emu6502::Regs{
++      .pc = (uint16_t)values[PC],
++      .a = (uint8_t)values[A],
++      .x = (uint8_t)values[X],
++      .y = (uint8_t)values[Y],
++      .status = (uint8_t)values[STATUS],
++      .sp = (uint8_t)values[SP]});
++  s_emu.setCycles((unsigned)values[CYCLES]);
++
++  a2_iostate_t *io = a2host_io();
++  io->vid_control = (uint8_t)values[VID_CONTROL];
++  io->clock = io->clock_last = (unsigned)values[CYCLES];
++  // Replaces anything the host staged before init_emulated() (its dummy
++  // keypress), which the saved program never saw.
++  io->keys_head = 0;
++  io->keys_count = 0;
++  io->latch = (uint8_t)values[KBD_LAST_KEY];
++  io->strobe = values[KBD_QUEUED] != 0;
++  fprintf(
++      stderr,
++      "Restored %s at $%04lX, cycle %lu\n",
++      path.c_str(),
++      values[PC],
++      values[CYCLES]);
++}
++
+ void startCollecting() {
+   s_emu.addDebugFlags(Emu6502::DebugASM);
+   s_dbg.setModeCollect(&s_emu, s_limit);
+@@ -384,6 +593,14 @@
+   if (!s_disk1Path.empty() || !s_disk2Path.empty())
+     a2_disk2_install_rom(s_emu.getMainRAMWritable());
+ 
++  if (!s_restorePath.empty()) {
++    if (!s_runPath.empty()) {
++      fprintf(stderr, "ERROR: --restore cannot be combined with a program to run\n");
++      exit(2);
++    }
++    restoreSnapshot(s_restorePath);
++  }
++
+   s_emu.setDebugStateCB(&s_dbg, debugCB);
+   // Collecting wants a complete picture; tracing does not want the keyboard and
+   // delay loops.
+@@ -477,6 +694,8 @@
+     return true;
+   if (prefix("--out=", &s_outPath))
+     return true;
++  if (prefix("--restore=", &s_restorePath))
++    return true;
+   if (strcmp(arg, "--collect") == 0) {
+     s_collect = true;
+     return true;
+@@ -515,6 +734,24 @@
+   printf(" --collect        Collect run data for apple2tc\n");
+   printf(" --limit=n        Stop collecting after n basic blocks\n");
+   printf(" --out=path       Write collected data here instead of stdout\n");
++  printf(" --restore=p      Resume a --snapshot-out= capture (p, p.regs, p.lc,\n");
++  printf("                  p.disk) instead of booting. Mount the same disks\n");
++}
++
++/// Overrides the weak default in probe.c: snapshots also save the Disk II
++/// state as <ram_path>.disk and the Language Card as <ram_path>.lc.
++extern "C" void engine_snapshot_extra(const char *ram_path) {
++  saveDisk2State(std::string(ram_path) + ".disk");
++  if (!s_emu.languageCardEnabled())
++    return;
++  std::string path = std::string(ram_path) + ".lc";
++  auto data = s_emu.saveLanguageCard();
++  FILE *f = fopen(path.c_str(), "wb");
++  if (!f || fwrite(data.data(), 1, data.size(), f) != data.size()) {
++    perror(path.c_str());
++    exit(2);
++  }
++  fclose(f);
+ }
+ 
+ /* --- engine6502.h --------------------------------------------------------- */

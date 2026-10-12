@@ -1,0 +1,14 @@
+# Main menu > Information: page through every screen.
+N 60000
+RETURN
+DOWN
+DOWN
+RETURN            # Information
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE
+SPACE

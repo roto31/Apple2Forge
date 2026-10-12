@@ -1,0 +1,104 @@
+diff -ruN a/include/apple2tc/probe.h b/include/apple2tc/probe.h
+--- a/include/apple2tc/probe.h	2026-10-11 18:48:12
++++ b/include/apple2tc/probe.h	2026-10-11 18:48:12
+@@ -89,6 +89,11 @@
+ /// would otherwise look like a successful run that wrote no file.
+ bool probe_snapshot_missed(void);
+ 
++/// Write the same snapshot files as probe_snapshot_at() does, immediately, to
++/// these paths. For a capture at a frame count rather than at an address;
++/// the recorded pc is wherever the CPU is between frames.
++void probe_snapshot_now(const char *ram_path, const char *regs_path);
++
+ /// Report probes that never fired, to stderr, one line per probe -- never to
+ /// the report file, so a diff of two reports cannot be perturbed by this
+ /// diagnostic. Prints nothing at all when every probe fired at least once
+diff -ruN a/lib/a2host/a2host.c b/lib/a2host/a2host.c
+--- a/lib/a2host/a2host.c	2026-10-11 18:48:12
++++ b/lib/a2host/a2host.c	2026-10-11 18:48:12
+@@ -61,6 +61,9 @@
+ /// Path from --snapshot-out=. The RAM image goes here and the registers to
+ /// the same name with ".regs" appended.
+ static const char *snapshot_out_ = NULL;
++/// From --snapshot-frame=: capture after this many frames instead (0 = off).
++static unsigned snapshot_frame_ = 0;
++static char snapshot_regs_path_[1024];
+ /// Assumed clock frequency. Can be used for "overclocking".
+ static unsigned clock_freq_ = A2_CLOCK_FREQ;
+ /// If true, dump key presses with cycle stamps.
+@@ -1079,6 +1082,8 @@
+             (unsigned long long)hash_video_state());
+   }
+   ++frame_no_;
++  if (snapshot_frame_ && frame_no_ == snapshot_frame_)
++    probe_snapshot_now(snapshot_out_, snapshot_regs_path_);
+   if (frame_limit_ && frame_no_ >= frame_limit_) {
+     if (hash_file_) {
+       fclose(hash_file_);
+@@ -1161,6 +1166,7 @@
+   printf(" --probe-out=p    Write probe output to the given file\n");
+   printf(" --snapshot-at=a  Dump machine state the first time PC reaches a (hex)\n");
+   printf(" --snapshot-out=p Where the snapshot goes; p and p.regs\n");
++  printf(" --snapshot-frame=n Dump machine state after n frames instead\n");
+   printf(" --probe-dump     Print the compiled probe script and exit\n");
+   printf(
+       " --hgr-mode=m     Windowed only: initial hi-res render mode -- color "
+@@ -1299,6 +1305,16 @@
+       snapshot_out_ = arg + 15;
+       continue;
+     }
++    if (strncmp(arg, "--snapshot-frame=", 17) == 0) {
++      char *end;
++      unsigned long v = strtoul(arg + 17, &end, 10);
++      if (arg[17] == 0 || *end != 0 || v == 0 || v > UINT_MAX) {
++        fprintf(stderr, "--snapshot-frame: expected a frame count > 0, got \"%s\"\n", arg + 17);
++        exit(2);
++      }
++      snapshot_frame_ = (unsigned)v;
++      continue;
++    }
+     if (strcmp(arg, "--probe-dump") == 0) {
+       probe_dump_ = true;
+       continue;
+@@ -1414,15 +1430,16 @@
+   // Each half of the snapshot is useless without the other, so neither is
+   // allowed to be implied. An address with nowhere to write it would run the
+   // whole program and silently produce nothing.
+-  if (snapshot_armed_ != (snapshot_out_ != NULL))
+-    probe_fatal("--snapshot-at and --snapshot-out must be given together");
+-  if (snapshot_armed_) {
+-    static char regs_path[1024];
+-    if ((size_t)snprintf(regs_path, sizeof(regs_path), "%s.regs", snapshot_out_) >=
+-        sizeof(regs_path))
+-      probe_fatal("--snapshot-out path is too long");
+-    probe_snapshot_at(snapshot_at_, snapshot_out_, regs_path);
+-  }
++  if (snapshot_armed_ && snapshot_frame_)
++    probe_fatal("--snapshot-at and --snapshot-frame are alternatives; give one");
++  if ((snapshot_armed_ || snapshot_frame_) != (snapshot_out_ != NULL))
++    probe_fatal("--snapshot-at or --snapshot-frame and --snapshot-out must be given together");
++  if (snapshot_out_ &&
++      (size_t)snprintf(snapshot_regs_path_, sizeof(snapshot_regs_path_), "%s.regs", snapshot_out_) >=
++          sizeof(snapshot_regs_path_))
++    probe_fatal("--snapshot-out path is too long");
++  if (snapshot_armed_)
++    probe_snapshot_at(snapshot_at_, snapshot_out_, snapshot_regs_path_);
+ 
+   // Before opening --probe-out=: a dump exits immediately and never runs, so
+   // it must not truncate an existing report on its way out.
+diff -ruN a/lib/a2host/probe.c b/lib/a2host/probe.c
+--- a/lib/a2host/probe.c	2026-10-11 18:48:12
++++ b/lib/a2host/probe.c	2026-10-11 18:48:12
+@@ -162,6 +162,12 @@
+   engine_snapshot_extra(s_snap_ram_path);
+ }
+ 
++void probe_snapshot_now(const char *ram_path, const char *regs_path) {
++  s_snap_ram_path = ram_path;
++  s_snap_regs_path = regs_path;
++  probe_take_snapshot(get_regs().pc);
++}
++
+ static char *read_file(const char *path) {
+   FILE *f = fopen(path, "rb");
+   if (!f)

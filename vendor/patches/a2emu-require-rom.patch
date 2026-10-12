@@ -1,0 +1,37 @@
+Apple2Forge: a2emu must not carry Apple's ROM. Require --rom=PATH and drop
+the reference to the compiled-in apple2plus_rom so the linker leaves it out.
+Applies to apple2tc e095c14ae7fd51fb638e14d5f9667ba6b19f945b.
+
+--- a/lib/engine6502/engine6502.cpp
++++ b/lib/engine6502/engine6502.cpp
+@@ -33,7 +33,6 @@
+ 
+ #include "apple2tc/DebugState6502.h"
+ #include "apple2tc/a2io.h"
+-#include "apple2tc/apple2plus_rom.h"
+ #include "apple2tc/emu6502.h"
+ #include "apple2tc/support.h"
+ 
+@@ -263,11 +262,12 @@
+ 
+ void init_emulated(void) {
+   if (s_romPath.empty()) {
+-    s_emu.loadROM(apple2plus_rom, apple2plus_rom_len);
+-  } else {
+-    auto rom = readFileOrDie(s_romPath);
+-    s_emu.loadROM(rom.data(), rom.size());
++    fprintf(stderr, "ERROR: no Apple II ROM given. This build has no built-in ROM; "
++                    "pass --rom=PATH to a ROM image you supply.\n");
++    exit(2);
+   }
++  auto rom = readFileOrDie(s_romPath);
++  s_emu.loadROM(rom.data(), rom.size());
+ 
+   if (!s_disk1Path.empty())
+     mountDisk(s_disk1Path, 0);
+@@ -400,4 +400,4 @@
+   printf(" <file>           DOS3.3 binary to load and run\n");
+-  printf(" --rom=path       Use this ROM instead of the built-in Apple II+\n");
++  printf(" --rom=path       Apple II ROM image to use (required; none is built in)\n");
+   printf(" --disk1=path     Mount a disk image in drive 1\n");
+   printf(" --disk2=path     Mount a disk image in drive 2\n");

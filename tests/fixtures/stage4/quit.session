@@ -1,0 +1,7 @@
+# Main menu > Quit.
+N 60000
+RETURN
+DOWN
+DOWN
+DOWN
+RETURN            # Quit

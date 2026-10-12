@@ -1,0 +1,1091 @@
+diff -ruN a/include/apple2tc/emu6502.h b/include/apple2tc/emu6502.h
+--- a/include/apple2tc/emu6502.h	2026-10-11 18:51:09
++++ b/include/apple2tc/emu6502.h	2026-10-11 18:51:09
+@@ -170,12 +170,25 @@
+     if (addr >= ioRangeStart_ && addr <= ioRangeEnd_)
+       ioPoke(addr, value);
+     else if (addr < romStart_)
+-      ram_[addr] = value;
++      writePage_[addr >> 8][addr & 0xFF] = value;
+     else
+       highWrite(addr, value);
+   }
+ 
++  /// Also execute the 65C02 opcodes (the enhanced Apple //e's CPU). Off by
++  /// default: an NMOS 6502 treats them as invalid.
++  void setCMOS(bool on) {
++    cmos_ = on;
++  }
++
+ protected:
++  /// Route CPU writes to \p page (below romStart_, outside the IO range) to
++  /// \p dst instead of the RAM array; nullptr restores the RAM array. Zero
++  /// page and stack accesses never go through this table.
++  void setWritePage(uint8_t page, uint8_t *dst) {
++    writePage_[page] = dst ? dst : ram_ + page * 0x100;
++  }
++
+   /// A CPU write at or above romStart_. ROM ignores it; a subclass that banks
+   /// RAM over the ROM (an Apple II Language Card) overrides this.
+   virtual void highWrite(uint16_t addr, uint8_t value) {}
+@@ -316,7 +329,13 @@
+   uint8_t adcDecimal(uint8_t b);
+   /// Perform A - B - Carry in decimal mode and update the flags.
+   uint8_t sbcDecimal(uint8_t b);
++  /// In 65C02 mode, set N and Z from a decimal result and add its extra cycle.
++  uint8_t cmosDecimalFlags(uint8_t result);
+ 
++  /// Execute one of the opcodes the 65C02 adds, charging its cycles. Returns
++  /// false for an opcode it does not know either.
++  bool execCMOS(uint8_t opcode);
++
+ protected:
+   /// A combination of DebugFlags.
+   uint8_t debug_ = 0;
+@@ -336,6 +355,10 @@
+ 
+   /// Offset in memory where the ROM starts. It is write only after.
+   unsigned romStart_ = 0x10000;
++
++  bool cmos_ = false;
++  /// Where CPU writes to each page land; see setWritePage().
++  uint8_t *writePage_[0x100];
+ 
+   /// Number of processor cycles.
+   unsigned cycles_ = 0;
+diff -ruN a/lib/a2host/a2host_gui.c b/lib/a2host/a2host_gui.c
+--- a/lib/a2host/a2host_gui.c	2026-10-11 18:51:09
++++ b/lib/a2host/a2host_gui.c	2026-10-11 18:51:09
+@@ -91,12 +91,32 @@
+     a2_sound_submit(&sound_, A2_CLOCK_FREQ, saudio_sample_rate(), get_cycles());
+ }
+ 
++/// An engine that emulates an Apple //e draws its own 560-dot-wide picture
++/// (80 columns, double lo-res and double hi-res need it) and wants //e
++/// keyboard rules; these weak defaults are the Apple II+ answer.
++__attribute__((weak)) bool engine_video_wide(void) {
++  return false;
++}
++__attribute__((weak)) void engine_render_wide(a2_rgba8 *pixels, unsigned stride, uint64_t ms, int hgrMode) {
++  (void)pixels;
++  (void)stride;
++  (void)ms;
++  (void)hgrMode;
++}
++
++#define WIDE_SCREEN_W_POT (A2_SCREEN_W_POT * 2)
++static bool wide_;
++static a2_rgba8 wideScreen_[WIDE_SCREEN_W_POT * A2_SCREEN_H_POT];
++
+ static void init_window(void) {
+   sg_desc desc = {.context = sapp_sgcontext()};
+   sg_setup(&desc);
+ 
++  wide_ = engine_video_wide();
++  // 560/1024 is the same fraction as 280/512, so the texture coordinates
++  // below hold for both widths.
+   sg_image_desc idesc = {
+-      .width = A2_SCREEN_W_POT,
++      .width = wide_ ? WIDE_SCREEN_W_POT : A2_SCREEN_W_POT,
+       .height = A2_SCREEN_H_POT,
+       .usage = SG_USAGE_STREAM,
+       .min_filter = SG_FILTER_LINEAR,
+@@ -292,6 +312,11 @@
+   // Milliseconds since hw reset. Used to determine blink phase.
+   uint64_t ms = (uint64_t)stm_ms(stm_diff(curFrameTick_, firstFrameTick_));
+ 
++  if (wide_) {
++    engine_render_wide(wideScreen_, WIDE_SCREEN_W_POT, ms, (int)hgrMode_);
++    return;
++  }
++
+   switch (a2_io_get_vidmode(a2host_io())) {
+   case A2_VIDMODE_TEXT:
+     apple2_render_text_screen(get_ram() + a2_io_get_text_page_offset(a2host_io()), &screen_, ms);
+@@ -328,6 +353,8 @@
+ 
+ static void update_screen_image(void) {
+   sg_image_data imgData = {.subimage[0][0] = {.ptr = screen_.data, .size = sizeof(screen_.data)}};
++  if (wide_)
++    imgData.subimage[0][0] = (sg_range){.ptr = wideScreen_, .size = sizeof(wideScreen_)};
+   sg_update_image(bind_.fs_images[SLOT_tex], &imgData);
+ }
+ 
+@@ -604,11 +631,23 @@
+   // so events here will have no effect.
+   a2host_drain_kbd_file();
+ 
++  // The //e's Open Apple and Solid Apple keys are pushbuttons 0 and 1.
++  if (wide_ && (ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP) &&
++      (ev->key_code == SAPP_KEYCODE_LEFT_ALT || ev->key_code == SAPP_KEYCODE_RIGHT_ALT)) {
++    uint8_t bit = ev->key_code == SAPP_KEYCODE_LEFT_ALT ? 0x01 : 0x02;
++    if (ev->type == SAPP_EVENTTYPE_KEY_DOWN)
++      a2host_io()->gameport.buttons |= bit;
++    else
++      a2host_io()->gameport.buttons &= (uint8_t)~bit;
++    return;
++  }
++
+   if (ev->type == SAPP_EVENTTYPE_CHAR && ev->char_code < 128) {
+     int k = (int)ev->char_code;
+-    if (k == 127) // Del
++    // The //e keyboard has lower case and a DELETE key ($7F).
++    if (k == 127 && !wide_) // Del
+       k = 8;
+-    else if (isalpha(k))
++    else if (isalpha(k) && !wide_)
+       k = toupper(k);
+     if (k != toIgnore)
+       a2host_press_key(k);
+@@ -616,8 +655,18 @@
+     switch (ev->key_code) {
+     case SAPP_KEYCODE_DELETE:
+     case SAPP_KEYCODE_BACKSPACE:
++      a2host_press_key(ignoreNextCh_ = wide_ ? 127 : 8);
++      break;
+     case SAPP_KEYCODE_LEFT:
+       a2host_press_key(ignoreNextCh_ = 8);
++      break;
++    case SAPP_KEYCODE_UP:
++      // $0B is Ctrl-K, which a II+ keyboard can type; games read it as up.
++      a2host_press_key(ignoreNextCh_ = 11);
++      break;
++    case SAPP_KEYCODE_DOWN:
++      // $0A is Ctrl-J, which a II+ keyboard can type; games read it as down.
++      a2host_press_key(ignoreNextCh_ = 10);
+       break;
+     case SAPP_KEYCODE_RIGHT:
+       a2host_press_key(ignoreNextCh_ = 21); // CTRL+U
+diff -ruN a/lib/cpuemu/emu6502.cpp b/lib/cpuemu/emu6502.cpp
+--- a/lib/cpuemu/emu6502.cpp	2026-10-11 18:51:09
++++ b/lib/cpuemu/emu6502.cpp	2026-10-11 18:51:09
+@@ -39,6 +39,8 @@
+ Emu6502::Emu6502(unsigned int ioRangeStart, unsigned int ioRangeEnd)
+     : ioRangeStart_(ioRangeStart), ioRangeEnd_(ioRangeEnd) {
+   memset(ram_, 0xFF, 0x10000);
++  for (unsigned page = 0; page != 0x100; ++page)
++    writePage_[page] = ram_ + page * 0x100;
+ }
+ 
+ void Emu6502::loadROM(const uint8_t *rom, unsigned int size) {
+@@ -79,7 +81,7 @@
+   if (ah > 15)
+     status_ |= STATUS_C;
+ 
+-  return (ah << 4) | (al & 15);
++  return cmosDecimalFlags((ah << 4) | (al & 15));
+ }
+ 
+ uint8_t Emu6502::sbcDecimal(uint8_t b) {
+@@ -102,9 +104,21 @@
+     status_ |= STATUS_C;
+   if ((int8_t)ah < 0)
+     ah -= 6;
+-  return (ah << 4) | (al & 15);
++  return cmosDecimalFlags((ah << 4) | (al & 15));
+ }
+ 
++uint8_t Emu6502::cmosDecimalFlags(uint8_t result) {
++  // The 65C02 sets N and Z from the decimal result and takes one more cycle;
++  // the 6502's N and Z come from the binary sum. ProDOS 8 2.x tells the two
++  // CPUs apart this way.
++  if (!cmos_)
++    return result;
++  status_ &= ~(STATUS_N | STATUS_Z);
++  status_ |= (result & STATUS_N) | (result ? 0 : STATUS_Z);
++  ++cycles_;
++  return result;
++}
++
+ Emu6502::StopReason Emu6502::runFor(unsigned runCycles) {
+ #define OP8() peek(pc_ + 1)
+ #define OP16() peek16(pc_ + 1)
+@@ -941,6 +955,8 @@
+       break;
+ 
+     default:
++      if (cmos_ && execCMOS(opcode))
++        break;
+       fprintf(stderr, "Invalid instruction $%02X\n", ram_[pc_]);
+       // TODO: we might want to decode the invalid instructions the way the
+       //       CPU would. Only if we find that it makes a difference.
+@@ -953,6 +969,175 @@
+ 
+ #undef BR_COND
+ #undef BR_ABS
++#undef OP16
++#undef OP8
++}
++
++bool Emu6502::execCMOS(uint8_t opcode) {
++#define OP8() peek(pc_ + 1)
++#define OP16() peek16(pc_ + 1)
++  auto charge = [this](unsigned cycles, unsigned length) {
++    cycles_ += cycles;
++    pc_ += length;
++  };
++  // (zp): the 16-bit address held in the zero page, without indexing.
++  auto zpIndirect = [this]() -> uint16_t { return peek16_zpg(OP8()); };
++  auto testAndModify = [this](uint8_t m, bool set) -> uint8_t {
++    status_ = (status_ & ~STATUS_Z) | (a_ & m ? 0 : STATUS_Z);
++    return set ? (m | a_) : (m & ~a_);
++  };
++  auto bitFlags = [this](uint8_t m) {
++    status_ = (status_ & ~(0xC0 | STATUS_Z)) | (m & 0xC0) | (a_ & m ? 0 : STATUS_Z);
++  };
++  auto adc = [this](uint8_t m) {
++    a_ = (status_ & STATUS_D) ? adcDecimal(m) : updateNZVC(a_ + m + (status_ & STATUS_C), a_, m);
++  };
++  auto sbc = [this](uint8_t m) {
++    a_ = (status_ & STATUS_D) ? sbcDecimal(m)
++                              : updateNZVInvC(a_ - m - (~status_ & STATUS_C), a_, ~m);
++  };
++
++  switch (opcode) {
++  case 0x80: { // BRA
++    auto offset = (int8_t)OP8();
++    pc_ += 2 + offset;
++    cycles_ += 3;
++    return true;
++  }
++  case 0xDA: // PHX
++    push8(x_);
++    charge(3, 1);
++    return true;
++  case 0x5A: // PHY
++    push8(y_);
++    charge(3, 1);
++    return true;
++  case 0xFA: // PLX
++    x_ = updateNZ(pop8());
++    charge(4, 1);
++    return true;
++  case 0x7A: // PLY
++    y_ = updateNZ(pop8());
++    charge(4, 1);
++    return true;
++  case 0x64: // STZ zpg
++    poke_zpg(OP8(), 0);
++    charge(3, 2);
++    return true;
++  case 0x74: // STZ zpg,X
++    poke_zpg_x(OP8(), 0);
++    charge(4, 2);
++    return true;
++  case 0x9C: // STZ abs
++    poke(OP16(), 0);
++    charge(4, 3);
++    return true;
++  case 0x9E: // STZ abs,X
++    poke_abs_x(OP16(), 0);
++    charge(5, 3);
++    return true;
++  case 0x04: // TSB zpg
++  case 0x14: { // TRB zpg
++    uint8_t addr = OP8();
++    poke_zpg(addr, testAndModify(peek_zpg(addr), opcode == 0x04));
++    charge(5, 2);
++    return true;
++  }
++  case 0x0C: // TSB abs
++  case 0x1C: { // TRB abs
++    uint16_t addr = OP16();
++    poke(addr, testAndModify(peek(addr), opcode == 0x0C));
++    charge(6, 3);
++    return true;
++  }
++  case 0x1A: // INC A
++    a_ = updateNZ(a_ + 1);
++    charge(2, 1);
++    return true;
++  case 0x3A: // DEC A
++    a_ = updateNZ(a_ - 1);
++    charge(2, 1);
++    return true;
++  case 0x89: // BIT #imm affects only Z.
++    status_ = (status_ & ~STATUS_Z) | (a_ & OP8() ? 0 : STATUS_Z);
++    charge(2, 2);
++    return true;
++  case 0x34: // BIT zpg,X
++    bitFlags(peek_zpg_x(OP8()));
++    charge(4, 2);
++    return true;
++  case 0x3C: // BIT abs,X
++    bitFlags(peek_abs_x(OP16()));
++    charge(4, 3);
++    return true;
++  case 0x12: // ORA (zpg)
++    a_ = updateNZ(a_ | peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0x32: // AND (zpg)
++    a_ = updateNZ(a_ & peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0x52: // EOR (zpg)
++    a_ = updateNZ(a_ ^ peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0x72: // ADC (zpg)
++    adc(peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0x92: // STA (zpg)
++    poke(zpIndirect(), a_);
++    charge(5, 2);
++    return true;
++  case 0xB2: // LDA (zpg)
++    a_ = updateNZ(peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0xD2: // CMP (zpg)
++    updateNZInvC(a_ - peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0xF2: // SBC (zpg)
++    sbc(peek(zpIndirect()));
++    charge(5, 2);
++    return true;
++  case 0x7C: // JMP (abs,X)
++    pc_ = peek16((uint16_t)(OP16() + x_));
++    cycles_ += 6;
++    return true;
++  // The rest of the 65C02's opcode map executes as NOPs of fixed length.
++  case 0x02:
++  case 0x22:
++  case 0x42:
++  case 0x62:
++  case 0x82:
++  case 0xC2:
++  case 0xE2:
++    charge(2, 2);
++    return true;
++  case 0x44:
++    charge(3, 2);
++    return true;
++  case 0x54:
++  case 0xD4:
++  case 0xF4:
++    charge(4, 2);
++    return true;
++  case 0x5C:
++    charge(8, 3);
++    return true;
++  case 0xDC:
++  case 0xFC:
++    charge(4, 3);
++    return true;
++  default:
++    if ((opcode & 0x03) == 0x03) { // Columns 3, 7, B and F.
++      charge(1, 1);
++      return true;
++    }
++    return false;
++  }
+ #undef OP16
+ #undef OP8
+ }
+diff -ruN a/lib/engine6502/engine6502.cpp b/lib/engine6502/engine6502.cpp
+--- a/lib/engine6502/engine6502.cpp	2026-10-11 18:51:09
++++ b/lib/engine6502/engine6502.cpp	2026-10-11 18:51:09
+@@ -34,6 +34,7 @@
+ #include "apple2tc/emu6502.h"
+ #include "apple2tc/support.h"
+ 
++#include <algorithm>
+ #include <cerrno>
+ #include <cstring>
+ #include <fcntl.h>
+@@ -132,12 +133,96 @@
+     return true;
+   }
+ 
++  /// Turns the machine into an Apple //e: 64K of auxiliary RAM with its own
++  /// Language Card set, the internal $C100-$CFFF ROM, and the soft switches
++  /// that choose between them. Call after loadROM() of the 16K $C000-$FFFF
++  /// image and powerOnLanguageCard(), and before anything is written to
++  /// $C100-$CFFF. \p slotDisk puts the Disk II boot ROM in slot 6.
++  ///
++  /// The CPU reads straight out of the RAM array, so -- like the Language
++  /// Card -- the array always holds the bank selected for reading, page by
++  /// page, and switching copies. Writes that go to the other bank are routed
++  /// through Emu6502's write page table.
++  void powerOnIIe(bool slotDisk) {
++    iie_ = true;
++    store80_ = ramrd_ = ramwrt_ = intcxrom_ = altzp_ = slotc3rom_ = false;
++    col80_ = altchar_ = dhires_ = page2_ = false;
++    memset(mainStore_, 0xFF, sizeof(mainStore_));
++    memset(auxStore_, 0xFF, sizeof(auxStore_));
++    memset(readAux_, 0, sizeof(readAux_));
++    memset(auxBank1_, 0xFF, sizeof(auxBank1_));
++    memset(auxBank2_, 0xFF, sizeof(auxBank2_));
++    memset(auxHigh_, 0xFF, sizeof(auxHigh_));
++    memcpy(internalCx_, getMainRAM() + kCxBase, kCxSize);
++    for (unsigned page = 0; page != kBankedPages; ++page)
++      setWritePage((uint8_t)page, nullptr);
++    setSlotDisk(slotDisk);
++  }
++
++  bool isIIe() const {
++    return iie_;
++  }
++
++  /// Puts the Disk II boot ROM in slot 6, or takes it out, and re-maps
++  /// $C100-$CFFF (which also repairs a2_disk2_install_rom() having written
++  /// $C600 over an internal ROM mapped there).
++  void setSlotDisk(bool present) {
++    memset(slotCx_, 0, kCxSize);
++    if (present) {
++      for (unsigned i = 0; i != 0x100; ++i)
++        slotCx_[kDiskSlotPage * 0x100 - kCxBase + i] = a2_disk2_rom_peek(i);
++    }
++    remapCx();
++  }
++
++  /// A byte of main or auxiliary RAM below $C000, whichever bank the CPU
++  /// currently reads.
++  uint8_t bankByte(bool aux, uint16_t addr) const {
++    if (readAux_[addr >> 8] == aux)
++      return getMainRAM()[addr];
++    return (aux ? auxStore_ : mainStore_)[addr];
++  }
++
++  struct VideoSwitches {
++    bool col80, altchar, dhires, store80, page2;
++  };
++  VideoSwitches videoSwitches() const {
++    return VideoSwitches{col80_, altchar_, dhires_, store80_, page2_};
++  }
++
++  /// One line per //e switch, "NAME 0|1", for snapshot sidecars.
++  std::string describeSwitches() const {
++    std::string out;
++    auto add = [&out](const char *name, bool on) {
++      out += name;
++      out += on ? " 1\n" : " 0\n";
++    };
++    uint8_t vc = a2host_io()->vid_control;
++    add("80STORE", store80_);
++    add("RAMRD", ramrd_);
++    add("RAMWRT", ramwrt_);
++    add("INTCXROM", intcxrom_);
++    add("ALTZP", altzp_);
++    add("SLOTC3ROM", slotc3rom_);
++    add("80COL", col80_);
++    add("ALTCHARSET", altchar_);
++    add("DHIRES", dhires_);
++    add("PAGE2", page2_);
++    add("TEXT", vc & A2_VC_TEXT);
++    add("MIXED", vc & A2_VC_MIXED);
++    add("HIRES", vc & A2_VC_HIRES);
++    return out;
++  }
++
+ protected:
+   uint8_t ioPeek(uint16_t addr) override {
+     if (lcEnabled_ && (addr & 0xFFF0) == kLcSwitchBase) {
+       languageCardSwitch(addr, true);
+       return 0;
+     }
++    uint8_t value = 0;
++    if (iie_ && iieAccess(addr, true, &value))
++      return value;
+     return io_peek(addr);
+   }
+   void ioPoke(uint16_t addr, uint8_t value) override {
+@@ -145,6 +230,8 @@
+       languageCardSwitch(addr, false);
+       return;
+     }
++    if (iie_ && iieAccess(addr, false, &value))
++      return;
+     io_poke(addr, value);
+   }
+   void highWrite(uint16_t addr, uint8_t value) override {
+@@ -224,6 +311,217 @@
+     }
+   }
+ 
++  /// Pages $00-$BF, the RAM that main and auxiliary memory both have.
++  static constexpr unsigned kBankedPages = 0xC0;
++  static constexpr unsigned kBankedSize = kBankedPages * 0x100;
++  static constexpr unsigned kCxBase = 0xC100;
++  static constexpr unsigned kCxSize = 0x0F00;
++  static constexpr unsigned kDiskSlotPage = 0xC6;
++  /// NTSC: 65 cycles x 262 lines per frame, of which lines 192-261 are the
++  /// vertical blank.
++  static constexpr unsigned kCyclesPerFrame = 17030;
++  static constexpr unsigned kVblStartCycle = 65 * 192;
++
++  /// //e soft switches at $C000-$C0FF beyond what a2io decodes. Returns false
++  /// to let the access fall through to a2io (the keyboard, the speaker, the
++  /// game port, the video switches a2io keeps, the Disk II).
++  bool iieAccess(uint16_t addr, bool isRead, uint8_t *value) {
++    if (addr >= kCxBase) {
++      // Slot and internal ROM, as mapped into the RAM array by remapCx().
++      if (isRead)
++        *value = getMainRAM()[addr];
++      return true;
++    }
++    if (addr <= 0xC00F) {
++      if (isRead)
++        return false; // keyboard
++      writeSwitch(addr & 0x0F);
++      return true;
++    }
++    if (addr >= 0xC011 && addr <= 0xC01F && isRead) {
++      *value = (statusFlag(addr & 0x0F) ? 0x80 : 0x00) | (a2host_io()->latch & 0x7F);
++      return true;
++    }
++    if (addr == 0xC07E || addr == 0xC07F) {
++      // IOUDIS writes are accepted and ignored; reads report IOUDIS (always
++      // on) and DHIRES.
++      if (isRead)
++        *value = (addr == 0xC07E || dhires_) ? 0x80 : 0x00;
++      return true;
++    }
++    if ((addr & 0xFFF0) == 0xC050)
++      return videoSwitch(addr, value);
++    return false;
++  }
++
++  void writeSwitch(unsigned which) {
++    bool on = which & 1;
++    switch (which >> 1) {
++    case 0:
++      store80_ = on;
++      remapMemory();
++      break;
++    case 1:
++      ramrd_ = on;
++      remapMemory();
++      break;
++    case 2:
++      ramwrt_ = on;
++      remapMemory();
++      break;
++    case 3:
++      intcxrom_ = on;
++      remapCx();
++      break;
++    case 4:
++      setAltZp(on);
++      break;
++    case 5:
++      slotc3rom_ = on;
++      remapCx();
++      break;
++    case 6:
++      col80_ = on;
++      break;
++    case 7:
++      altchar_ = on;
++      break;
++    }
++  }
++
++  bool statusFlag(unsigned which) const {
++    uint8_t vc = a2host_io()->vid_control;
++    switch (which) {
++    case 0x1:
++      return bank2_;
++    case 0x2:
++      return readRam_;
++    case 0x3:
++      return ramrd_;
++    case 0x4:
++      return ramwrt_;
++    case 0x5:
++      return intcxrom_;
++    case 0x6:
++      return altzp_;
++    case 0x7:
++      return slotc3rom_;
++    case 0x8:
++      return store80_;
++    case 0x9: // RDVBLBAR: low during the vertical blank.
++      return getCycles() % kCyclesPerFrame < kVblStartCycle;
++    case 0xA:
++      return vc & A2_VC_TEXT;
++    case 0xB:
++      return vc & A2_VC_MIXED;
++    case 0xC:
++      return page2_;
++    case 0xD:
++      return vc & A2_VC_HIRES;
++    case 0xE:
++      return altchar_;
++    default:
++      return col80_;
++    }
++  }
++
++  /// $C050-$C05F. With 80STORE on, PAGE2 selects main or auxiliary display
++  /// memory instead of the displayed page, so a2io never sees it; HIRES then
++  /// also decides whether $2000-$3FFF follows PAGE2.
++  bool videoSwitch(uint16_t addr, uint8_t *value) {
++    *value = 0;
++    switch (addr) {
++    case 0xC054:
++    case 0xC055:
++      page2_ = addr == 0xC055;
++      if (store80_) {
++        remapMemory();
++        return true;
++      }
++      return false;
++    case 0xC056:
++    case 0xC057:
++      io_peek(addr);
++      if (store80_)
++        remapMemory();
++      return true;
++    case 0xC05E:
++    case 0xC05F:
++      dhires_ = addr == 0xC05E;
++      return false;
++    default:
++      return false;
++    }
++  }
++
++  bool pageReadsAux(unsigned page, bool hires) const {
++    if (page < 0x02)
++      return altzp_;
++    if (store80_ && ((page >= 0x04 && page < 0x08) || (hires && page >= 0x20 && page < 0x40)))
++      return page2_;
++    return ramrd_;
++  }
++  bool pageWritesAux(unsigned page, bool hires) const {
++    if (page < 0x02)
++      return altzp_;
++    if (store80_ && ((page >= 0x04 && page < 0x08) || (hires && page >= 0x20 && page < 0x40)))
++      return page2_;
++    return ramwrt_;
++  }
++
++  void remapMemory() {
++    bool hires = a2host_io()->vid_control & A2_VC_HIRES;
++    uint8_t *ram = getMainRAMWritable();
++    for (unsigned page = 0; page != kBankedPages; ++page) {
++      bool readAux = pageReadsAux(page, hires);
++      uint8_t *live = ram + page * 0x100;
++      if (readAux != readAux_[page]) {
++        memcpy((readAux_[page] ? auxStore_ : mainStore_) + page * 0x100, live, 0x100);
++        memcpy(live, (readAux ? auxStore_ : mainStore_) + page * 0x100, 0x100);
++        readAux_[page] = readAux;
++      }
++      bool writeAux = pageWritesAux(page, hires);
++      setWritePage(
++          (uint8_t)page,
++          writeAux == readAux ? nullptr : (writeAux ? auxStore_ : mainStore_) + page * 0x100);
++    }
++  }
++
++  /// ALTZP also switches the Language Card between its main and auxiliary
++  /// sets of RAM.
++  void setAltZp(bool on) {
++    if (on == altzp_)
++      return;
++    if (lcEnabled_) {
++      uint8_t *ram = getMainRAMWritable();
++      if (readRam_) {
++        memcpy(selectedBank(), ram + kLcBase, kLcBankSize);
++        memcpy(high_, ram + kLcHighBase, kLcHighSize);
++      }
++      std::swap_ranges(bank1_, bank1_ + kLcBankSize, auxBank1_);
++      std::swap_ranges(bank2Ram_, bank2Ram_ + kLcBankSize, auxBank2_);
++      std::swap_ranges(high_, high_ + kLcHighSize, auxHigh_);
++      if (readRam_) {
++        memcpy(ram + kLcBase, selectedBank(), kLcBankSize);
++        memcpy(ram + kLcHighBase, high_, kLcHighSize);
++      }
++    }
++    altzp_ = on;
++    remapMemory();
++  }
++
++  /// No card has $C800 ROM, so $C800-$CFFF is the internal ROM whenever the
++  /// //e itself would select it (INTCXROM, or the internal slot 3 ROM).
++  void remapCx() {
++    uint8_t *ram = getMainRAMWritable();
++    bool c3Internal = intcxrom_ || !slotc3rom_;
++    for (unsigned page = 0xC1; page <= 0xCF; ++page) {
++      bool internal = page >= 0xC8 || page == 0xC3 ? c3Internal : intcxrom_;
++      const uint8_t *source = (internal ? internalCx_ : slotCx_) + page * 0x100 - kCxBase;
++      memcpy(ram + page * 0x100, source, 0x100);
++    }
++  }
++
+   bool lcEnabled_ = false;
+   bool readRam_ = false;
+   bool writeEnabled_ = false;
+@@ -233,6 +531,29 @@
+   uint8_t bank1_[kLcBankSize];
+   uint8_t bank2Ram_[kLcBankSize];
+   uint8_t high_[kLcHighSize];
++
++  bool iie_ = false;
++  bool store80_ = false;
++  bool ramrd_ = false;
++  bool ramwrt_ = false;
++  bool intcxrom_ = false;
++  bool altzp_ = false;
++  bool slotc3rom_ = false;
++  bool col80_ = false;
++  bool altchar_ = false;
++  bool dhires_ = false;
++  bool page2_ = false;
++  /// Per page, whether the RAM array holds the auxiliary copy. The store of
++  /// the bank *not* mapped for reading is the live one.
++  bool readAux_[kBankedPages];
++  uint8_t mainStore_[kBankedSize];
++  uint8_t auxStore_[kBankedSize];
++  /// The Language Card set not currently selected by ALTZP.
++  uint8_t auxBank1_[kLcBankSize];
++  uint8_t auxBank2_[kLcBankSize];
++  uint8_t auxHigh_[kLcHighSize];
++  uint8_t internalCx_[kCxSize];
++  uint8_t slotCx_[kCxSize];
+ };
+ 
+ HostedEmu s_emu;
+@@ -240,6 +561,14 @@
+ a2_stop_reason_t s_stopReason = A2_STOP_CYCLES;
+ 
+ std::string s_romPath;
++/// "iiplus" (default) or "iie".
++std::string s_model = "iiplus";
++std::string s_videoRomPath;
++/// The //e character generator: 256 glyphs of 8 rows, bit 0 the leftmost
++/// dot, a 0 bit lit.
++std::vector<uint8_t> s_videoRom;
++constexpr size_t kIIeRomSize = 0x4000;
++constexpr size_t kVideoRomCharsetSize = 0x800;
+ std::string s_runPath;
+ std::string s_disk1Path;
+ std::string s_disk2Path;
+@@ -335,7 +664,10 @@
+     return false;
+   }
+   drv.current_track = track;
+-  a2_disk2_install_rom(s_emu.getMainRAMWritable());
++  if (s_emu.isIIe())
++    s_emu.setSlotDisk(true);
++  else
++    a2_disk2_install_rom(s_emu.getMainRAMWritable());
+   fprintf(stderr, "control: [frame %u] drive %d now holds %s\n", a2host_frame_no(), drive + 1, path.c_str());
+   return true;
+ }
+@@ -667,16 +999,39 @@
+     exit(2);
+   }
+   auto rom = readFileOrDie(s_romPath);
++  bool iie = s_model == "iie";
++  if (iie) {
++    if (rom.size() != kIIeRomSize) {
++      fprintf(stderr, "ERROR: --model=iie needs the 16K $C000-$FFFF //e ROM; %s is %zu bytes\n",
++              s_romPath.c_str(), rom.size());
++      exit(2);
++    }
++    if (s_videoRomPath.empty()) {
++      fprintf(stderr, "ERROR: --model=iie needs --video-rom=PATH (the //e character ROM)\n");
++      exit(2);
++    }
++    s_videoRom = readFileOrDie(s_videoRomPath);
++    if (s_videoRom.size() < kVideoRomCharsetSize) {
++      fprintf(stderr, "ERROR: %s is too small to be a //e video ROM\n", s_videoRomPath.c_str());
++      exit(2);
++    }
++  }
+   s_emu.loadROM(rom.data(), rom.size());
+   s_emu.powerOnLanguageCard(rom.size());
++  bool haveDisk = !s_disk1Path.empty() || !s_disk2Path.empty();
++  if (iie) {
++    s_emu.setCMOS(true);
++    s_emu.powerOnIIe(haveDisk);
++  }
+ 
+   if (!s_disk1Path.empty())
+     mountDisk(s_disk1Path, 0);
+   if (!s_disk2Path.empty())
+     mountDisk(s_disk2Path, 1);
+   // The CPU fetches instructions straight out of RAM, bypassing ioPeek(), so
+-  // the boot ROM has to actually be there.
+-  if (!s_disk1Path.empty() || !s_disk2Path.empty())
++  // the boot ROM has to actually be there. (The //e maps it with its other
++  // slot ROM.)
++  if (haveDisk && !iie)
+     a2_disk2_install_rom(s_emu.getMainRAMWritable());
+ 
+   if (s_controlFd >= 0) {
+@@ -688,6 +1043,10 @@
+   }
+ 
+   if (!s_restorePath.empty()) {
++    if (iie) {
++      fprintf(stderr, "ERROR: --restore is not supported with --model=iie\n");
++      exit(2);
++    }
+     if (!s_runPath.empty()) {
+       fprintf(stderr, "ERROR: --restore cannot be combined with a program to run\n");
+       exit(2);
+@@ -783,6 +1142,15 @@
+ 
+   if (prefix("--rom=", &s_romPath))
+     return true;
++  if (prefix("--model=", &s_model)) {
++    if (s_model != "iiplus" && s_model != "iie") {
++      fprintf(stderr, "ERROR: --model must be iiplus or iie, not %s\n", s_model.c_str());
++      exit(2);
++    }
++    return true;
++  }
++  if (prefix("--video-rom=", &s_videoRomPath))
++    return true;
+   if (prefix("--disk1=", &s_disk1Path))
+     return true;
+   if (prefix("--disk2=", &s_disk2Path))
+@@ -823,6 +1191,9 @@
+   printf("\n 6502 interpreter engine:\n");
+   printf(" <file>           DOS3.3 binary to load and run\n");
+   printf(" --rom=path       Apple II ROM image to use (required; none is built in)\n");
++  printf(" --model=m        iiplus (default; 12K ROM) or iie: an enhanced Apple //e\n");
++  printf("                  with 128K and a 65C02 (16K $C000-$FFFF ROM)\n");
++  printf(" --video-rom=path //e character ROM (required with --model=iie)\n");
+   printf(" --disk1=path     Mount a disk image in drive 1\n");
+   printf(" --disk2=path     Mount a disk image in drive 2\n");
+   printf(" --control-fd=n   Read \"mount 1|2 PATH\" / \"eject 1|2\" lines from fd n\n");
+@@ -839,10 +1210,232 @@
+   printf("                  p.disk) instead of booting. Mount the same disks\n");
+ }
+ 
++namespace {
++
++void writeFileOrDie(const std::string &path, const void *data, size_t size) {
++  FILE *f = fopen(path.c_str(), "wb");
++  if (!f || fwrite(data, 1, size, f) != size) {
++    perror(path.c_str());
++    exit(2);
++  }
++  fclose(f);
++}
++
++/// <ram_path>.main and <ram_path>.aux: $0000-$BFFF of each bank; and
++/// <ram_path>.iie: the //e switches, one "NAME 0|1" per line.
++void saveIIeState(const char *ram_path) {
++  constexpr unsigned kBankedSize = 0xC000;
++  std::vector<uint8_t> main(kBankedSize), aux(kBankedSize);
++  for (unsigned addr = 0; addr != kBankedSize; ++addr) {
++    main[addr] = s_emu.bankByte(false, (uint16_t)addr);
++    aux[addr] = s_emu.bankByte(true, (uint16_t)addr);
++  }
++  std::string base(ram_path);
++  writeFileOrDie(base + ".main", main.data(), main.size());
++  writeFileOrDie(base + ".aux", aux.data(), aux.size());
++  std::string switches = s_emu.describeSwitches();
++  writeFileOrDie(base + ".iie", switches.data(), switches.size());
++}
++
++/* --- //e video ------------------------------------------------------------ */
++
++constexpr unsigned kWideW = 560;
++constexpr unsigned kTextRows = 24;
++constexpr unsigned kMixedTextRow = 20;
++constexpr unsigned kDotsPerCell = 7;
++constexpr unsigned kWideCellW = 14;
++/// Same rate as a2io's 40-column flash.
++constexpr uint64_t kFlashPeriodMs = 267;
++const a2_rgba8 kLit = {0xFF, 0xFF, 0xFF, 0};
++const a2_rgba8 kDark = {0, 0, 0, 0};
++/// The lo-res palette, which double hi-res shares; same values as a2io's.
++const a2_rgba8 kLoresColors[16] = {
++    {0, 0, 0, 0},       {227, 30, 96, 0},   {96, 78, 189, 0},   {255, 68, 253, 0},
++    {0, 163, 96, 0},    {156, 156, 156, 0}, {20, 207, 253, 0},  {208, 195, 255, 0},
++    {96, 114, 3, 0},    {255, 106, 60, 0},  {156, 156, 156, 0}, {255, 160, 208, 0},
++    {20, 245, 60, 0},   {208, 221, 141, 0}, {114, 255, 208, 0}, {255, 255, 255, 0},
++};
++
++unsigned textRowOffset(unsigned row) {
++  return (row % 8) * 128 + (row / 8) * 40;
++}
++unsigned hiresLineOffset(unsigned line) {
++  return (line % 8) * 0x400 + ((line / 8) % 8) * 0x80 + (line / 64) * 40;
++}
++
++struct WideTarget {
++  a2_rgba8 *pixels;
++  unsigned stride;
++  a2_rgba8 *at(unsigned x, unsigned y) const {
++    return pixels + y * stride + x;
++  }
++};
++
++/// One character cell, \p dotWidth screen dots per character dot. In the
++/// primary set $40-$7F flash between inverse and normal; ALTCHARSET shows
++/// MouseText and inverse lower case there instead.
++void drawChar(const WideTarget &t, unsigned x0, unsigned row, uint8_t ch, unsigned dotWidth, bool flashPhase,
++              bool altchar) {
++  unsigned glyph = ch;
++  bool invert = false;
++  if (!altchar && ch >= 0x40 && ch < 0x80) {
++    glyph = ch & 0x3F;
++    invert = flashPhase;
++  }
++  const uint8_t *bits = s_videoRom.data() + glyph * 8;
++  for (unsigned line = 0; line != 8; ++line) {
++    a2_rgba8 *d = t.at(x0, row * 8 + line);
++    for (unsigned dot = 0; dot != kDotsPerCell; ++dot) {
++      bool lit = !((bits[line] >> dot) & 1) != invert;
++      for (unsigned w = 0; w != dotWidth; ++w)
++        *d++ = lit ? kLit : kDark;
++    }
++  }
++}
++
++void drawTextRows(const WideTarget &t, unsigned firstRow, uint16_t base, bool col80, bool altchar, uint64_t ms) {
++  bool flashPhase = (ms / kFlashPeriodMs) & 1;
++  for (unsigned row = firstRow; row != kTextRows; ++row) {
++    uint16_t offset = (uint16_t)(base + textRowOffset(row));
++    for (unsigned col = 0; col != 40; ++col) {
++      uint8_t mainCh = s_emu.bankByte(false, (uint16_t)(offset + col));
++      if (col80) {
++        drawChar(t, col * kWideCellW, row, s_emu.bankByte(true, (uint16_t)(offset + col)), 1, flashPhase, altchar);
++        drawChar(t, col * kWideCellW + kDotsPerCell, row, mainCh, 1, flashPhase, altchar);
++      } else {
++        drawChar(t, col * kWideCellW, row, mainCh, 2, flashPhase, altchar);
++      }
++    }
++  }
++}
++
++void fillLoresBlock(const WideTarget &t, unsigned x0, unsigned width, unsigned row, uint8_t value) {
++  for (unsigned line = 0; line != 8; ++line) {
++    const a2_rgba8 &color = kLoresColors[line < 4 ? value & 0x0F : value >> 4];
++    a2_rgba8 *d = t.at(x0, row * 8 + line);
++    for (unsigned x = 0; x != width; ++x)
++      *d++ = color;
++  }
++}
++
++unsigned rol4(unsigned nibble) {
++  return ((nibble << 1) | (nibble >> 3)) & 0x0F;
++}
++
++/// Double lo-res shows each auxiliary nibble rotated one bit left.
++uint8_t rotateAuxLores(uint8_t value) {
++  return (uint8_t)(rol4(value & 0x0F) | (rol4(value >> 4) << 4));
++}
++
++void drawLoresRows(const WideTarget &t, unsigned lastRow, uint16_t base, bool doubleRes) {
++  for (unsigned row = 0; row != lastRow; ++row) {
++    uint16_t offset = (uint16_t)(base + textRowOffset(row));
++    for (unsigned col = 0; col != 40; ++col) {
++      uint8_t mainValue = s_emu.bankByte(false, (uint16_t)(offset + col));
++      if (doubleRes) {
++        uint8_t auxValue = rotateAuxLores(s_emu.bankByte(true, (uint16_t)(offset + col)));
++        fillLoresBlock(t, col * kWideCellW, kDotsPerCell, row, auxValue);
++        fillLoresBlock(t, col * kWideCellW + kDotsPerCell, kDotsPerCell, row, mainValue);
++      } else {
++        fillLoresBlock(t, col * kWideCellW, kWideCellW, row, mainValue);
++      }
++    }
++  }
++}
++
++/// Double hi-res: each line is 560 dots, seven from an auxiliary byte then
++/// seven from the main byte at the same address, low bit first. In colour
++/// every four dots are one pixel of the lo-res palette, numbered so that the
++/// fourth dot is bit 0 (Apple IIe Technical Note #3, Table 2: magenta, colour
++/// 1, is aux $08 / main $11, which lights dots 3, 7, 11, ...).
++void drawDoubleHiresLines(const WideTarget &t, unsigned lastLine, uint16_t base, bool mono) {
++  uint8_t dots[kWideW];
++  for (unsigned line = 0; line != lastLine; ++line) {
++    uint16_t offset = (uint16_t)(base + hiresLineOffset(line));
++    for (unsigned col = 0; col != 40; ++col) {
++      uint8_t auxByte = s_emu.bankByte(true, (uint16_t)(offset + col));
++      uint8_t mainByte = s_emu.bankByte(false, (uint16_t)(offset + col));
++      for (unsigned bit = 0; bit != kDotsPerCell; ++bit) {
++        dots[col * kWideCellW + bit] = (auxByte >> bit) & 1;
++        dots[col * kWideCellW + kDotsPerCell + bit] = (mainByte >> bit) & 1;
++      }
++    }
++    a2_rgba8 *d = t.at(0, line);
++    if (mono) {
++      for (unsigned x = 0; x != kWideW; ++x)
++        d[x] = dots[x] ? kLit : kDark;
++      continue;
++    }
++    for (unsigned x = 0; x != kWideW; x += 4) {
++      unsigned value = dots[x] | dots[x + 1] << 1 | dots[x + 2] << 2 | dots[x + 3] << 3;
++      for (unsigned i = 0; i != 4; ++i)
++        d[x + i] = kLoresColors[rol4(value)];
++    }
++  }
++}
++
++/// 40-column hi-res goes through a2io's renderer (all four F3 modes) at 280
++/// dots, then every dot is doubled.
++void drawHiresLines(const WideTarget &t, unsigned lastLine, uint16_t base, bool mixed, uint64_t ms, int hgrMode) {
++  static a2_screen narrow;
++  static uint8_t page[0x2000];
++  static uint8_t textPage[0x400];
++  for (unsigned i = 0; i != sizeof(page); ++i)
++    page[i] = s_emu.bankByte(false, (uint16_t)(base + i));
++  memset(textPage, 0xA0, sizeof(textPage));
++  auto mode = (a2_hgr_mode_t)hgrMode;
++  apple2_render_hgr_screen_mode(page, textPage, &narrow, ms, mixed, mode);
++  if (mode == A2_HGR_COLOR140 || mode == A2_HGR_MONO140)
++    apple2_widen_hgr_cells(&narrow, mixed);
++  for (unsigned line = 0; line != lastLine; ++line) {
++    const a2_rgba8 *src = narrow.data + line * A2_SCREEN_W_POT;
++    a2_rgba8 *d = t.at(0, line);
++    for (unsigned x = 0; x != A2_SCREEN_W; ++x)
++      d[2 * x] = d[2 * x + 1] = src[x];
++  }
++}
++
++} // namespace
++
++extern "C" bool engine_video_wide(void) {
++  return s_model == "iie";
++}
++
++extern "C" void engine_render_wide(a2_rgba8 *pixels, unsigned stride, uint64_t ms, int hgrMode) {
++  if (!s_emu.isIIe())
++    return;
++  WideTarget t{pixels, stride};
++  auto sw = s_emu.videoSwitches();
++  uint8_t vc = a2host_io()->vid_control;
++  // With 80STORE on, PAGE2 picks a bank rather than the displayed page.
++  bool page2 = !sw.store80 && (vc & A2_VC_PAGE2);
++  uint16_t textBase = page2 ? 0x0800 : 0x0400;
++  uint16_t hiresBase = page2 ? 0x4000 : 0x2000;
++  bool mixed = (vc & A2_VC_MIXED) != 0;
++  bool doubleRes = sw.col80 && sw.dhires;
++
++  if (vc & A2_VC_TEXT) {
++    drawTextRows(t, 0, textBase, sw.col80, sw.altchar, ms);
++    return;
++  }
++  unsigned graphicsRows = mixed ? kMixedTextRow : kTextRows;
++  if (!(vc & A2_VC_HIRES))
++    drawLoresRows(t, graphicsRows, textBase, doubleRes);
++  else if (doubleRes)
++    drawDoubleHiresLines(t, graphicsRows * 8, hiresBase,
++                         hgrMode == A2_HGR_MONO || hgrMode == A2_HGR_MONO140);
++  else
++    drawHiresLines(t, graphicsRows * 8, hiresBase, mixed, ms, hgrMode);
++  if (mixed)
++    drawTextRows(t, kMixedTextRow, textBase, sw.col80, sw.altchar, ms);
++}
++
+ /// Overrides the weak default in probe.c: snapshots also save the Disk II
+ /// state as <ram_path>.disk and the Language Card as <ram_path>.lc.
+ extern "C" void engine_snapshot_extra(const char *ram_path) {
+   saveDisk2State(std::string(ram_path) + ".disk");
++  if (s_emu.isIIe())
++    saveIIeState(ram_path);
+   if (!s_emu.languageCardEnabled())
+     return;
+   std::string path = std::string(ram_path) + ".lc";

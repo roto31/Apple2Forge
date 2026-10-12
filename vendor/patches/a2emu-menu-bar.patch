@@ -1,0 +1,59 @@
+--- a/include/apple2tc/sokol/sokol_app.h	2026-10-11 20:09:38
++++ b/include/apple2tc/sokol/sokol_app.h	2026-10-11 20:09:38
+@@ -1787,7 +1787,9 @@
+ #if defined(_SAPP_MACOS)
+ @interface _sapp_macos_app_delegate : NSObject<NSApplicationDelegate>
+ @end
+-@interface _sapp_macos_window : NSWindow
++// A non-activating panel takes keyboard focus without activating this
++// process, so the launching app keeps the menu bar.
++@interface _sapp_macos_window : NSPanel
+ @end
+ @interface _sapp_macos_window_delegate : NSObject<NSWindowDelegate>
+ @end
+@@ -3089,7 +3091,8 @@
+         NSWindowStyleMaskTitled |
+         NSWindowStyleMaskClosable |
+         NSWindowStyleMaskMiniaturizable |
+-        NSWindowStyleMaskResizable;
++        NSWindowStyleMaskResizable |
++        NSWindowStyleMaskNonactivatingPanel;
+     NSRect window_rect = NSMakeRect(0, 0, _sapp.window_width, _sapp.window_height);
+     _sapp.macos.window = [[_sapp_macos_window alloc]
+         initWithContentRect:window_rect
+@@ -3097,6 +3100,9 @@
+         backing:NSBackingStoreBuffered
+         defer:NO];
+     _sapp.macos.window.releasedWhenClosed = NO; // this is necessary for proper cleanup in applicationWillTerminate
++    _sapp.macos.window.hidesOnDeactivate = NO;
++    ((NSPanel*)_sapp.macos.window).becomesKeyOnlyIfNeeded = NO;
++    ((NSPanel*)_sapp.macos.window).floatingPanel = NO;
+     _sapp.macos.window.title = [NSString stringWithUTF8String:_sapp.window_title];
+     _sapp.macos.window.acceptsMouseMovedEvents = YES;
+     _sapp.macos.window.restorable = YES;
+@@ -3170,8 +3176,8 @@
+         [_sapp.macos.window center];
+     }
+     NSApp.activationPolicy = NSApplicationActivationPolicyRegular;
+-    [NSApp activateIgnoringOtherApps:YES];
+-    [_sapp.macos.window makeKeyAndOrderFront:nil];
++    [_sapp.macos.window orderFrontRegardless];
++    [_sapp.macos.window makeKeyWindow];
+     _sapp_macos_update_dimensions();
+     [NSEvent setMouseCoalescingEnabled:NO];
+ }
+@@ -3262,6 +3268,14 @@
+         #endif
+     }
+     return self;
++}
++
++- (BOOL)canBecomeKeyWindow {
++    return YES;
++}
++
++- (BOOL)canBecomeMainWindow {
++    return YES;
+ }
+ 
+ - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
