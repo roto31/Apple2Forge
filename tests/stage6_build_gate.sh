@@ -159,10 +159,12 @@ if ! bash "${REPO_ROOT}/tools/60_build_app.sh" >> "${LOG_FILE}" 2>&1; then
   fail_gate "Gate B1: Build" "${gate_start}" "tools/60_build_app.sh failed; see ${LOG_FILE}."
 fi
 plist="${APP}/Contents/Info.plist"
-if [[ "$(plutil -extract A2FProjectRoot raw "${plist}" 2>/dev/null)" != "${REPO_ROOT}" ]] \
-   || [[ "$(plutil -extract CFBundleShortVersionString raw "${plist}")" != "0.2.0" ]] \
+expected_version="$(sed -n 's/^readonly APP_VERSION="\(.*\)"$/\1/p' "${REPO_ROOT}/tools/60_build_app.sh")"
+if [[ -z "${expected_version}" ]] \
+   || [[ "$(plutil -extract A2FProjectRoot raw "${plist}" 2>/dev/null)" != "${REPO_ROOT}" ]] \
+   || [[ "$(plutil -extract CFBundleShortVersionString raw "${plist}")" != "${expected_version}" ]] \
    || ! plutil -p "${plist}" | grep -q '"nib"'; then
-  fail_gate "Gate B1: Build" "${gate_start}" "Info.plist lacks the project path, version 0.2.0 or the disk document types."
+  fail_gate "Gate B1: Build" "${gate_start}" "Info.plist lacks the project path, version ${expected_version:-?} (APP_VERSION in tools/60_build_app.sh) or the disk document types."
 fi
 if ! codesign --verify --strict --deep "${APP}" >> "${LOG_FILE}" 2>&1; then
   fail_gate "Gate B1: Build" "${gate_start}" "codesign --verify failed."

@@ -87,9 +87,10 @@ class T1BundleTests(unittest.TestCase):
     def test_t1_layout_gives_emulator_and_disk(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             app = self.make_app(root)
-            emulator, disk = t1_boot_check.bundle_paths(app)
+            emulator, disk, second_disk = t1_boot_check.bundle_paths(app)
             self.assertTrue(emulator.endswith("Contents/MacOS/a2emu"))
             self.assertTrue(disk.endswith("Contents/Resources/disk.dsk"))
+            self.assertIsNone(second_disk)
 
     def test_app_without_disk_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as root:
