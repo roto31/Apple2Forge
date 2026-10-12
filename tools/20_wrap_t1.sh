@@ -188,8 +188,8 @@ cp "${EMULATOR}" "${STAGING}/Contents/MacOS/a2emu"
 chmod 0755 "${STAGING}/Contents/MacOS/launcher" "${STAGING}/Contents/MacOS/a2emu"
 python3 -I - "${disk_set_json}" "${STAGING}/Contents/Resources" <<'PY'
 import json, os, shutil, sys
-data = json.load(sys.stdin)
-resources = sys.argv[1]
+data = json.loads(sys.argv[1])
+resources = sys.argv[2]
 tsv = os.path.join(resources, "disks.tsv")
 with open(tsv, "w", encoding="utf-8") as handle:
     for side in data["sides"]:
@@ -262,7 +262,10 @@ WINDOW = 256
 roms = []
 for path in sys.argv[2:]:
     data = open(path, "rb").read()
-    roms.append((path, [data[off:off + WINDOW] for off in range(0, len(data), WINDOW)]))
+    # A window of one repeated byte (the //e ROM's zero-filled I/O page) holds no
+    # ROM content and would match any padded file, so it is not searched for.
+    windows = [data[off:off + WINDOW] for off in range(0, len(data), WINDOW)]
+    roms.append((path, [w for w in windows if len(set(w)) > 1]))
 hits = []
 for folder, _, files in os.walk(sys.argv[1]):
     for name in files:
