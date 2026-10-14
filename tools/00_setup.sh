@@ -165,11 +165,16 @@ arch_name="$(uname -m)"
 os_version="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
 log "platform: ${os_name} ${arch_name} macOS ${os_version}"
 echo "    macOS ${os_version} on ${arch_name}"
-if [[ "${os_name}" != "Darwin" || "${arch_name}" != "arm64" ]]; then
-  fail_gate "Gate 0: Platform (macOS arm64)" "${gate_start}" \
-    "This project targets Apple Silicon macOS. Run it on an arm64 Mac (not under Rosetta: check 'uname -m')." 2
+translated="$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)"
+if [[ "${os_name}" != "Darwin" ]] || [[ "${arch_name}" != "arm64" && "${arch_name}" != "x86_64" ]]; then
+  fail_gate "Gate 0: Platform (macOS arm64/x86_64)" "${gate_start}" \
+    "This project targets macOS on Apple silicon or Intel; found ${os_name} ${arch_name}." 2
 fi
-pass_gate "Gate 0: Platform (macOS arm64)" "${gate_start}"
+if [[ "${translated}" == "1" ]]; then
+  fail_gate "Gate 0: Platform (macOS arm64/x86_64)" "${gate_start}" \
+    "This shell runs under Rosetta. Open a native (arm64) Terminal; the builds are universal either way." 2
+fi
+pass_gate "Gate 0: Platform (macOS arm64/x86_64)" "${gate_start}"
 
 # ── Gate 1: required tools ──────────────────────────────────────────
 gate_start="$(date +%s)"

@@ -15,7 +15,7 @@ readonly PACKAGE_DIR="${REPO_ROOT}/app/Apple2Forge"
 readonly EMULATOR="${REPO_ROOT}/build/a2emu-norom/a2emu"
 APP="${REPO_ROOT}/build/Apple2Forge.app"
 readonly RELEASE_APP="${REPO_ROOT}/build/release/Apple2Forge.app"
-readonly APP_VERSION="0.3.0"
+readonly APP_VERSION="0.4.0"
 readonly BUNDLE_ID="local.apple2native.Apple2Forge"
 readonly MIN_MACOS="14.0"
 readonly ROM_WINDOW_BYTES=256
@@ -41,12 +41,14 @@ LOG_FILE="${LOG_DIR}/build_app.log"
 SUMMARY_TITLE="Stage 6 Apple2Forge.app build"
 # shellcheck source=lib/gates.sh
 source "${REPO_ROOT}/tools/lib/gates.sh"
+# shellcheck source=lib/universal.sh
+source "${REPO_ROOT}/tools/lib/universal.sh"
 
 usage() {
   cat <<EOF
 Usage: tools/60_build_app.sh [--release] [--dry-run] [--help]
 
-Builds ${APP#"${REPO_ROOT}"/} (version ${APP_VERSION}).
+Builds ${APP#"${REPO_ROOT}"/} (version ${APP_VERSION}), universal (arm64 + x86_64).
 Needs tools/15_build_a2emu_norom.sh to have run first.
   --release  Build ${RELEASE_APP#"${REPO_ROOT}"/} for distribution: this
              project's path is not recorded, so the Build tab asks for the
@@ -87,6 +89,9 @@ done
 if [[ ! -x "${EMULATOR}" ]]; then
   fail_gate "Gate 0: Inputs" "${gate_start}" "No ${EMULATOR}. Run tools/15_build_a2emu_norom.sh first." 2
 fi
+if ! is_universal "${EMULATOR}"; then
+  fail_gate "Gate 0: Inputs" "${gate_start}" "${EMULATOR} is $(describe_archs "${EMULATOR}") only, not universal. Rebuild: tools/15_build_a2emu_norom.sh" 2
+fi
 for file in "${BUNDLED_FILES[@]}"; do
   if [[ ! -f "${REPO_ROOT}/${file}" ]]; then
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing ${file}." 2
@@ -102,13 +107,17 @@ fi
 
 # ── Gate 1: compile ─────────────────────────────────────────────────
 gate_start="$(date +%s)"
-echo "[Gate 1] swift build -c release"
-if ! swift build -c release --package-path "${PACKAGE_DIR}" >> "${LOG_FILE}" 2>&1; then
+echo "[Gate 1] swift build -c release ${UNIVERSAL_SWIFT_ARCH_FLAGS[*]}"
+if ! swift build -c release "${UNIVERSAL_SWIFT_ARCH_FLAGS[@]}" --package-path "${PACKAGE_DIR}" >> "${LOG_FILE}" 2>&1; then
   fail_gate "Gate 1: Compile" "${gate_start}" "swift build failed; see ${LOG_FILE}."
 fi
-binary="$(swift build -c release --package-path "${PACKAGE_DIR}" --show-bin-path)/Apple2Forge"
+binary="$(swift build -c release "${UNIVERSAL_SWIFT_ARCH_FLAGS[@]}" --package-path "${PACKAGE_DIR}" --show-bin-path)/Apple2Forge"
 if [[ ! -x "${binary}" ]]; then
   fail_gate "Gate 1: Compile" "${gate_start}" "No binary at ${binary}."
+fi
+echo "  slices: $(describe_archs "${binary}")"
+if ! is_universal "${binary}"; then
+  fail_gate "Gate 1: Compile" "${gate_start}" "${binary} is not universal (arm64 + x86_64); see ${LOG_FILE}."
 fi
 pass_gate "Gate 1: Compile" "${gate_start}"
 
@@ -225,6 +234,17 @@ if ! codesign --force --sign - "${APP}/Contents/Resources/a2emu" >> "${LOG_FILE}
   fail_gate "Gate 4: Sign" "${gate_start}" "codesign failed; see ${LOG_FILE}."
 fi
 pass_gate "Gate 4: Sign" "${gate_start}"
+
+# ── Gate 5: universal after strip and sign ──────────────────────────
+gate_start="$(date +%s)"
+echo "[Gate 5] Universal executables in the bundle"
+for executable in "${APP}/Contents/MacOS/Apple2Forge" "${APP}/Contents/Resources/a2emu"; do
+  echo "  ${executable#"${APP}"/}: $(describe_archs "${executable}")"
+  if ! is_universal "${executable}"; then
+    fail_gate "Gate 5: Universal" "${gate_start}" "${executable} lost a slice; rerun tools/15_build_a2emu_norom.sh and this script."
+  fi
+done
+pass_gate "Gate 5: Universal" "${gate_start}"
 
 echo "Built ${APP} (version ${APP_VERSION}, build ${build_number})"
 print_summary "PASSED"

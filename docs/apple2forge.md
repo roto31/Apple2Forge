@@ -136,7 +136,7 @@ It uses the Number Munchers disks, so it needs your own copy of them. Not automa
 ## Limits
 
 - **The Build tab needs a source checkout**, as described above.
-- arm64 (Apple silicon) only. Ad-hoc signed, not notarized: see [first launch](getting-started.md#first-launch).
+- Universal (Apple silicon and Intel; the Intel half tested under Rosetta only). Releases from 0.4.0 are Developer ID signed and notarized; a copy you build yourself is ad-hoc signed: see [first launch](getting-started.md#first-launch).
 - T1 apps you build contain the same emulator as Apple2Forge, with its Disk II PROM and font ([notices](../THIRD_PARTY_NOTICES.md#apple-firmware)). The T2-hybrid build's Disk II code has the PROM table zeroed.
 
 ## See also

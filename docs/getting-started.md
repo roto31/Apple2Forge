@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later, on Apple silicon. The release is built for arm64 only; on an Intel Mac, [build from source](building-from-source.md) (untested).
+- macOS 14 (Sonoma) or later, on Apple silicon or Intel. From 0.4.0 the release is a universal app. Its Intel half has been tested under Rosetta on Apple silicon, not yet on an Intel Mac. Releases 0.3.0 and earlier are Apple silicon (arm64) only.
 - **Python 3** for the library download, catalog and compatibility check, which Apple2Forge runs as scripts. Python 3 comes with the Xcode Command Line Tools: run `xcode-select --install` in Terminal if `python3 --version` reports that it is missing.
 - About 330 MB of free space for the educational library.
 - The Apple II ROM files: see [Installing ROMs](installing-roms.md).
@@ -20,10 +20,12 @@
 
 ## First launch
 
-The app is ad-hoc signed and not notarized by Apple, so macOS blocks the first launch:
+From 0.4.0 the app is signed with a Developer ID and notarized by Apple. Open it like any app downloaded from the internet: macOS asks once whether you want to open it; choose **Open**.
 
-1. Open `Apple2Forge.app`. macOS says it can't verify the developer; choose **Done**.
-2. Open **System Settings ▸ Privacy & Security**, scroll to the message about Apple2Forge, and choose **Open Anyway**.
+Releases 0.3.0 and earlier, and apps built on another Mac (for example a T1 app copied over by AirDrop), are ad-hoc signed and not notarized, so macOS blocks their first launch:
+
+1. Open the app. macOS says it can't verify the developer; choose **Done**.
+2. Open **System Settings ▸ Privacy & Security**, scroll to the message about the app, and choose **Open Anyway**.
 3. Open the app again and confirm.
 
 After that it opens normally.

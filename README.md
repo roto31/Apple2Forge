@@ -4,7 +4,7 @@ This repository turns Apple II disk images into Mac apps. It has two parts:
 
 | Part | What it is | Needs |
 |---|---|---|
-| **[Native conversion toolkit](docs/native-conversion.md)** | Scripts in `tools/` that analyze a 140K disk image you own and wrap it into a Mac app. In a **T1** app, the original program runs in a built-in emulator. For MECC's *Number Munchers* v1.3, they also recompile the game's 6502 code to native arm64 (**T2-hybrid**) | A source checkout, the Xcode Command Line Tools, `cmake`, `python3`, and your own Apple II+ ROM |
+| **[Native conversion toolkit](docs/native-conversion.md)** | Scripts in `tools/` that analyze a 140K disk image you own and wrap it into a Mac app. In a **T1** app, the original program runs in a built-in emulator. For MECC's *Number Munchers* v1.3, they also recompile the game's 6502 code to native code for Apple silicon and Intel (**T2-hybrid**) | A source checkout, the Xcode Command Line Tools, `cmake`, `python3`, and your own Apple II+ ROM |
 | **[Apple2Forge](docs/apple2forge.md)** (bundled app) | A Mac app with two tabs. **Library** downloads and plays about 1,200 Apple II educational titles. **Build** runs the toolkit on disk images you drag in | Library: the [release download](https://github.com/roto31/Apple2Forge/releases) and your ROMs. Build: a source checkout as well |
 
 > **No Apple system ROMs or games are included.** Disk images are downloaded only when you ask, and you install the Apple II ROMs yourself. The bundled emulator does contain two small pieces of Apple-derived firmware data from upstream apple2tc: the Disk II boot PROM and the Apple ][ text font. See [third-party notices](THIRD_PARTY_NOTICES.md#apple-firmware). Use only software and ROMs you are entitled to use; apps built from your disks are for personal use. See [Legal and ROMs](docs/legal-and-roms.md).
@@ -39,7 +39,7 @@ See [Apple2Forge](docs/apple2forge.md).
 
 ### Play the educational library
 
-1. Download `Apple2Forge-<version>-macOS.zip` from [Releases](https://github.com/roto31/Apple2Forge/releases), unzip it and move `Apple2Forge.app` to Applications. The first launch needs one extra step, because the app is not notarized: see [Getting started](docs/getting-started.md#first-launch).
+1. Download `Apple2Forge-<version>-macOS.zip` from [Releases](https://github.com/roto31/Apple2Forge/releases), unzip it and move `Apple2Forge.app` to Applications. From 0.4.0 the app is universal (Apple silicon and Intel), Developer ID signed and notarized, so it opens normally; older releases need one extra step: see [Getting started](docs/getting-started.md#first-launch).
 2. Install the Apple II ROMs: see [Installing ROMs](docs/installing-roms.md).
 3. Choose **Library ▸ Download Educational Library…**, then **Use Default Location** or **Choose Location…**.
 4. Choose a title from the **Library** menu.

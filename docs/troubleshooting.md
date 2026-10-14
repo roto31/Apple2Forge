@@ -14,7 +14,7 @@ Messages from Apple2Forge appear in its main window.
 ## Starting the app
 
 **"Apple2Forge can't be opened" / "cannot verify the developer"**
-The app isn't notarized. Use **System Settings ▸ Privacy & Security ▸ Open Anyway**: see [First launch](getting-started.md#first-launch).
+Apple2Forge 0.4.0 and later are notarized and shouldn't show this. Releases 0.3.0 and earlier, and T1/T2 apps built on another Mac, aren't notarized: use **System Settings ▸ Privacy & Security ▸ Open Anyway**. See [First launch](getting-started.md#first-launch).
 
 ## Starting a title
 

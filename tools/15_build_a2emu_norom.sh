@@ -44,13 +44,16 @@ LOG_FILE="${LOG_DIR}/15_build_a2emu_norom.log"
 SUMMARY_TITLE="Stage 2B ROM-free a2emu build"
 # shellcheck source=lib/gates.sh
 source "${REPO_ROOT}/tools/lib/gates.sh"
+# shellcheck source=lib/universal.sh
+source "${REPO_ROOT}/tools/lib/universal.sh"
 
 usage() {
   cat <<'EOF'
 Usage: tools/15_build_a2emu_norom.sh [--dry-run] [--help]
 
 Builds build/a2emu-norom/a2emu: apple2tc's emulator with the built-in
-Apple II+ ROM removed. The result refuses to start without --rom=PATH.
+Apple II+ ROM removed, as a universal (arm64 + x86_64) binary. The result
+refuses to start without --rom=PATH.
 Needs: Stage 0 done (vendor/apple2tc + pin), roms/apple2plus.rom (for the
 "no ROM bytes inside" check; run tools/05_fetch_rom.sh first).
 
@@ -103,7 +106,7 @@ pass_gate "Gate 0: Prerequisites" "${gate_start}"
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   echo "[dry-run] would: git archive ${PIN} → vendor/apple2tc-norom-src/ (replacing it)"
   for patch_file in "${PATCH_FILES[@]}"; do echo "[dry-run] would: apply ${patch_file#"${REPO_ROOT}"/}"; done
-  echo "[dry-run] would: cmake configure + build target a2emu → build/a2emu-norom/a2emu"
+  echo "[dry-run] would: cmake configure (${UNIVERSAL_ARCHS}) + build target a2emu → build/a2emu-norom/a2emu"
   print_summary "PASSED (dry run)"
   exit 0
 fi
@@ -166,7 +169,8 @@ pass_gate "Gate 2: Apply patches" "${gate_start}"
 gate_start="$(date +%s)"
 echo "[Gate 3] Build a2emu (this takes a minute or two)"
 cpu_count="$(sysctl -n hw.ncpu)"
-if ! cmake -S "${SRC_DIR}" -B "${CMAKE_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release >>"${LOG_FILE}" 2>&1; then
+if ! cmake -S "${SRC_DIR}" -B "${CMAKE_BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_OSX_ARCHITECTURES="${UNIVERSAL_ARCHS}" >>"${LOG_FILE}" 2>&1; then
   fail_gate "Gate 3: Build a2emu" "${gate_start}" "cmake configure failed; see ${LOG_FILE#"${REPO_ROOT}"/}."
 fi
 if ! cmake --build "${CMAKE_BUILD_DIR}" --target a2emu -j "${cpu_count}" >>"${LOG_FILE}" 2>&1; then
@@ -181,6 +185,15 @@ cp -f "${built_binary}" "${OUT_BINARY}.tmp"
 mv -f "${OUT_BINARY}.tmp" "${OUT_BINARY}"
 ARTIFACTS+=("build/a2emu-norom/a2emu")
 pass_gate "Gate 3: Build a2emu" "${gate_start}"
+
+# ── Gate 3b: universal binary ───────────────────────────────────────
+gate_start="$(date +%s)"
+echo "[Gate 3b] Universal binary (arm64 + x86_64)"
+echo "    slices: $(describe_archs "${OUT_BINARY}")"
+if ! is_universal "${OUT_BINARY}"; then
+  fail_gate "Gate 3b: Universal binary" "${gate_start}" "a2emu lacks an arm64 or x86_64 slice. Check CMAKE_OSX_ARCHITECTURES in ${LOG_FILE#"${REPO_ROOT}"/}; clean rebuild: rerun this script."
+fi
+pass_gate "Gate 3b: Universal binary" "${gate_start}"
 
 # ── Gate 4: no ROM bytes in the binary ──────────────────────────────
 gate_start="$(date +%s)"
@@ -274,6 +287,23 @@ if [[ "${round_trip_ok}" -ne 1 ]]; then
   fail_gate "Gate 5c: Restore round trip" "${gate_start}" "A restored snapshot did not reproduce the original; see the differing files above and the log."
 fi
 pass_gate "Gate 5c: Restore round trip" "${gate_start}"
+
+# ── Gate 5d: Intel slice runs ───────────────────────────────────────
+# Under Rosetta on Apple silicon; natively on an Intel Mac.
+gate_start="$(date +%s)"
+echo "[Gate 5d] x86_64 slice: ${SMOKE_FRAMES}-frame headless run"
+if ! rosetta_available; then
+  echo "  WARN: cannot run x86_64 code here (install Rosetta: softwareupdate --install-rosetta); slice not exercised" >&2
+  skip_gate "Gate 5d: x86_64 smoke run" "no Rosetta"
+else
+  intel_status=0
+  run_limited "${HELP_TIMEOUT_SECONDS}" arch -x86_64 "${OUT_BINARY}" --headless --no-sound --frames="${SMOKE_FRAMES}" \
+    --rom="${ROM_FILE}" >>"${LOG_FILE}" 2>&1 || intel_status=$?
+  if [[ "${intel_status}" -ne 0 ]]; then
+    fail_gate "Gate 5d: x86_64 smoke run" "${gate_start}" "arch -x86_64 a2emu exited ${intel_status} (142 = hung); see the log."
+  fi
+  pass_gate "Gate 5d: x86_64 smoke run" "${gate_start}"
+fi
 
 # ── Gate 6: record build info ───────────────────────────────────────
 gate_start="$(date +%s)"

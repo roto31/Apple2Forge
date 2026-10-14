@@ -4,7 +4,7 @@ You can build the emulator and the app yourself. The build downloads the upstrea
 
 ## Prerequisites
 
-- macOS 14 or later. Tested on Apple silicon (arm64) only.
+- macOS 14 or later, on Apple silicon or Intel. Every build is universal (arm64 + x86_64). Tested on Apple silicon, with the Intel half run under Rosetta; run the scripts from a native Terminal (`tools/00_setup.sh` refuses a Rosetta shell).
 - Xcode or the Xcode Command Line Tools, for `clang++`, `swift`, `git` and `perl`.
 - `cmake` and `python3`: `brew install cmake python3` if `tools/00_setup.sh` reports them missing.
 
@@ -54,9 +54,15 @@ It then builds `a2emu` and checks the result:
 
 ### 4. `tools/60_build_app.sh`
 
-Builds the Swift package in `app/Apple2Forge/` (`swift build -c release`) and assembles `build/Apple2Forge.app`. It copies in `a2emu` and the library scripts and rules: the download, catalog and compatibility-check scripts and their `library/*.json` rules. It records this checkout in `Info.plist` as the project folder, so the **Build** tab works without choosing it in Settings. Then it checks that no ROM or disk image is in the bundle, and ad-hoc signs it. An existing app is moved to `build/Apple2Forge.backup-<time>.app` first.
+Builds the Swift package in `app/Apple2Forge/` as a universal binary (`swift build -c release --arch arm64 --arch x86_64`) and assembles `build/Apple2Forge.app`. It copies in `a2emu` and the library scripts and rules: the download, catalog and compatibility-check scripts and their `library/*.json` rules. It records this checkout in `Info.plist` as the project folder, so the **Build** tab works without choosing it in Settings. Then it checks that no ROM or disk image is in the bundle, and ad-hoc signs it. An existing app is moved to `build/Apple2Forge.backup-<time>.app` first.
 
 `--release` builds `build/release/Apple2Forge.app` for distribution instead. It records no project folder and strips debug symbols, which contain source paths. A gate then fails the build if this checkout's path, or your home folder's, appears in any file. Releases on GitHub are built this way.
+
+Every build checks that the app and its `a2emu` contain both an arm64 and an x86_64 slice (`lipo -archs`). `tools/15_build_a2emu_norom.sh` also runs the x86_64 `a2emu` under Rosetta when Rosetta is installed.
+
+### 5. `tools/65_sign_notarize.sh` (optional)
+
+Signs `build/release/Apple2Forge.app` with your own Developer ID Application certificate and the hardened runtime, notarizes it with an App Store Connect API key, staples the ticket, checks that Gatekeeper accepts it, and writes `build/release/Apple2Forge-<version>-macOS.zip` with a `.sha256`. Its settings come from `config/release.local.env`, which Git ignores; `--help` lists them. Without it, builds stay ad-hoc signed.
 
 The toolkit stages the Build tab runs are not bundled. They stay in the checkout: see [Apple2Forge](apple2forge.md#build-tab).
 

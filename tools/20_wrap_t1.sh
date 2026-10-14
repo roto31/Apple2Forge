@@ -32,6 +32,8 @@ LOG_FILE="${LOG_DIR}/20_wrap_t1.log"
 SUMMARY_TITLE="Stage 2 T1 wrap"
 # shellcheck source=lib/gates.sh
 source "${REPO_ROOT}/tools/lib/gates.sh"
+# shellcheck source=lib/universal.sh
+source "${REPO_ROOT}/tools/lib/universal.sh"
 
 usage() {
   cat <<'EOF'
@@ -121,6 +123,9 @@ if ! grep -q "a2emu-language-card.patch" "${EMULATOR_INFO}"; then
 fi
 if ! grep -q "a2emu-disk-menu.patch" "${EMULATOR_INFO}"; then
   fail_gate "Gate 0: Inputs" "${gate_start}" "build/a2emu-norom/a2emu predates the T1 disk menu. Rebuild: tools/15_build_a2emu_norom.sh" 2
+fi
+if ! is_universal "${EMULATOR}"; then
+  fail_gate "Gate 0: Inputs" "${gate_start}" "build/a2emu-norom/a2emu is $(describe_archs "${EMULATOR}") only, not universal (arm64 + x86_64). Rebuild: tools/15_build_a2emu_norom.sh" 2
 fi
 for entry in "${LICENSE_SOURCES[@]}"; do
   if [[ ! -r "${entry%%:*}" ]]; then

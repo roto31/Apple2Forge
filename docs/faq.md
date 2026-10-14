@@ -50,9 +50,9 @@ The emulated hardware was checked against Apple's *Apple //e Technical Reference
 
 Yes, the Apple II speaker is emulated.
 
-## Why is the app not notarized?
+## Is the app notarized?
 
-Notarization needs a paid Apple Developer ID. Releases are ad-hoc signed instead; see [First launch](getting-started.md#first-launch). You can also [build it yourself](building-from-source.md).
+From 0.4.0, yes: releases are signed with a Developer ID and notarized by Apple. Releases 0.3.0 and earlier, an app you [build yourself](building-from-source.md), and the T1/T2 apps the toolkit makes are ad-hoc signed; see [First launch](getting-started.md#first-launch).
 
 ## What are T1 and T2?
 
@@ -60,4 +60,4 @@ Two ways of turning a disk into a Mac app. **T1** wraps the original program in 
 
 ## Does it run on an Intel Mac?
 
-The release is arm64 (Apple silicon) only. Building from source on an Intel Mac hasn't been tried.
+Yes, from 0.4.0. The release, the bundled emulator and the T1/T2 apps the toolkit builds are universal (arm64 + x86_64). The Intel half has been tested under Rosetta on Apple silicon, not yet on an Intel Mac; reports are welcome. Releases 0.3.0 and earlier are Apple silicon only.

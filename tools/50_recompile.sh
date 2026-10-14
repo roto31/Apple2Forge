@@ -30,6 +30,8 @@ LOG_FILE="${LOG_DIR}/50_recompile.log"
 SUMMARY_TITLE="Stage 5 recompile (T2-hybrid)"
 # shellcheck source=lib/gates.sh
 source "${REPO_ROOT}/tools/lib/gates.sh"
+# shellcheck source=lib/universal.sh
+source "${REPO_ROOT}/tools/lib/universal.sh"
 
 usage() {
   cat <<'EOF'
@@ -183,12 +185,17 @@ pass_gate "Gate 5: Link" "${gate_start}"
 
 # ── Gate 6: build ───────────────────────────────────────────────────
 gate_start="$(date +%s)"
-echo "[Gate 6] Build a2n-t2"
+echo "[Gate 6] Build a2n-t2 (${UNIVERSAL_ARCHS})"
 if ! cmake -S "${T2_SOURCE}" -B "${build}/cmake" -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_OSX_ARCHITECTURES="${UNIVERSAL_ARCHS}" \
       -DA2N_VENDOR_DIR="${VENDOR_SRC}" -DA2N_GEN_DIR="${build}/gen" >>"${LOG_FILE}" 2>&1 ||
    ! cmake --build "${build}/cmake" --target a2n-t2 -j "${jobs}" >>"${LOG_FILE}" 2>&1 ||
    [[ ! -x "${build}/cmake/a2n-t2" ]]; then
   fail_gate "Gate 6: Build" "${gate_start}" "Build failed; see log. Clean rebuild: rm -rf ${build}/cmake and re-run."
+fi
+echo "    slices: $(describe_archs "${build}/cmake/a2n-t2")"
+if ! is_universal "${build}/cmake/a2n-t2"; then
+  fail_gate "Gate 6: Build" "${gate_start}" "a2n-t2 is not universal (arm64 + x86_64). Clean rebuild: rm -rf ${build}/cmake and re-run."
 fi
 ARTIFACTS+=("${build}/cmake/a2n-t2")
 pass_gate "Gate 6: Build" "${gate_start}"

@@ -9,9 +9,26 @@ All notable changes to this project (the native conversion toolkit and the bundl
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+Apple2Forge now runs on Intel Macs as well as Apple silicon, and it's signed and notarized, so it opens without the Privacy & Security step.
+
 ### Added
+- **Intel support.** Apple2Forge.app, its emulator, and the T1 and T2-hybrid apps the toolkit builds are universal binaries (arm64 + x86_64). The Intel half was tested under Rosetta on Apple silicon. See [Getting started — requirements](docs/getting-started.md#requirements) and [FAQ](docs/faq.md#does-it-run-on-an-intel-mac).
 - **First-run setup:** Apple2Forge can download and install ROMs on first launch, or you can choose your own files. It can also download the educational library to the default folder; if you skip that step, the Library tab reminds you with **Download Now…**. See [Getting started](docs/getting-started.md#first-run-setup-roms-and-library) and [Installing ROMs](docs/installing-roms.md#option-1-first-launch-in-apple2forge).
 - T1 apps can bundle every disk and side of a title, pick Apple ][+ or enhanced //e automatically, and swap disks from a **Disk** menu. See [Make a Mac app from your disk](docs/make-a-mac-app-from-your-disk.md), [Playing games — T1 disk menu](docs/playing-games.md#changing-disks-in-a-t1-app), and [Apple2Forge — Build tab](docs/apple2forge.md#build-a-disk).
+
+### Security
+- The release is signed with a Developer ID (hardened runtime, secure timestamp) and notarized by Apple, with the ticket stapled. The first launch no longer needs **Open Anyway**. See [First launch](docs/getting-started.md#first-launch).
+
+### Build
+- `tools/15_build_a2emu_norom.sh`, `tools/50_recompile.sh`, `tools/60_build_app.sh` build universal binaries and fail if a slice is missing; `tools/20_wrap_t1.sh` and `tools/55_wrap_t2.sh` refuse a non-universal engine. `tools/00_setup.sh` accepts Intel Macs and refuses a Rosetta shell. See [Building from source](docs/building-from-source.md#prerequisites).
+- New `tools/65_sign_notarize.sh`: Developer ID signing, notarization, stapling and the release zip, for builders with their own certificate. See [Building from source](docs/building-from-source.md#5-tools65_sign_notarizesh-optional).
+
+### Known limitations
+- Not yet run on an Intel Mac; only under Rosetta.
+- T1 and T2-hybrid apps the toolkit builds are still ad-hoc signed; a copy moved to another Mac needs the [first-launch steps](docs/getting-started.md#first-launch).
+- Releases are about twice as large (two architectures).
 
 ## [0.3.0] - 2026-10-11
 

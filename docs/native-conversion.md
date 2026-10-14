@@ -11,7 +11,7 @@ The worked example throughout is MECC's *Number Munchers* v1.3 (MECC A-170). It 
 | Tier | What runs | Works for | Needs at run time |
 |---|---|---|---|
 | **T1**: emulator wrap | The original 6502 program, unchanged, in the patched `a2emu` emulator inside the app (Apple ][+ with a 16K Language Card) | Any 140K `.dsk`, `.do` or `.po` disk the analyzer supports. Whether it *runs* depends on the disk: check it with the [boot check](make-a-mac-app-from-your-disk.md#4-check-that-it-boots) | Your Apple II+ ROM installed on that Mac |
-| **T2-hybrid**: recompiled | The program's 6502 code translated to C by [apple2tc](https://github.com/tmikov/apple2tc) and compiled to native arm64. A built-in 6502 interpreter runs any code that wasn't translated. Graphics, sound, keyboard and the Disk II are still emulated hardware | Number Munchers v1.3 (4am crack) only | No ROM |
+| **T2-hybrid**: recompiled | The program's 6502 code translated to C by [apple2tc](https://github.com/tmikov/apple2tc) and compiled to native code for Apple silicon and Intel. A built-in 6502 interpreter runs any code that wasn't translated. Graphics, sound, keyboard and the Disk II are still emulated hardware | Number Munchers v1.3 (4am crack) only | No ROM |
 
 A full rewrite into native Mac code (sometimes called T3) was not attempted.
 
@@ -80,7 +80,7 @@ What apple2tc couldn't do alone, and how it was worked around:
 - **Native share is measured per session, not per byte of the game.** Code that no session reached still runs, but in the interpreter. Teacher settings and real joystick play were never run.
 - **Sound wasn't compared.** Frame hashes cover video only. The speaker uses the same emulated hardware code in both builds.
 - **Saves stay in memory.** Neither T1 nor T2 writes back to the disk image.
-- arm64 only, ad-hoc signed, not notarized. The window is titled "a2emu" (T1) or "a2n-t2" (T2).
+- Universal (arm64 + x86_64; the x86_64 half tested under Rosetta), ad-hoc signed, not notarized. The window is titled "a2emu" (T1) or "a2n-t2" (T2).
 
 ## T2 for another disk
 

@@ -31,6 +31,8 @@ LOG_FILE="${LOG_DIR}/55_wrap_t2.log"
 SUMMARY_TITLE="Stage 5 T2-hybrid wrap"
 # shellcheck source=lib/gates.sh
 source "${REPO_ROOT}/tools/lib/gates.sh"
+# shellcheck source=lib/universal.sh
+source "${REPO_ROOT}/tools/lib/universal.sh"
 
 usage() {
   cat <<'EOF'
@@ -94,6 +96,9 @@ for needed in "${LAUNCHER}" "${NOTICE}" "${ROM_FILE}" "${DISK2_SOURCE}" "${PIN_F
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing ${needed#"${REPO_ROOT}"/}. Run tools/50_recompile.sh first." 2
   fi
 done
+if ! is_universal "${ENGINE}"; then
+  fail_gate "Gate 0: Inputs" "${gate_start}" "${ENGINE#"${REPO_ROOT}"/} is $(describe_archs "${ENGINE}") only, not universal. Rebuild: rm -rf ${BUILD#"${REPO_ROOT}"/}/cmake && tools/50_recompile.sh" 2
+fi
 for suffix in "${START_SUFFIXES[@]}"; do
   if [[ ! -r "${START_IMAGE}${suffix}" ]]; then
     fail_gate "Gate 0: Inputs" "${gate_start}" "Missing start image ${START_IMAGE#"${REPO_ROOT}"/}${suffix}. Run tools/50_recompile.sh." 2

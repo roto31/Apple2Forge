@@ -36,3 +36,7 @@ roms/
 .DS_Store
 .venv/
 __pycache__/
+
+# Release signing settings and keys (tools/65_sign_notarize.sh)
+config/release.local.env
+config/AuthKey_*.p8
